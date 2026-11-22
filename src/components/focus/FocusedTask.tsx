@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 
 import { format } from "@/lib/date-utils";
+import { formatDueDateLong } from "@/lib/task-dates";
+
+import { useSettingsStore } from "@/store/settings";
 
 import { Task, TaskStatus } from "@/types/task";
 
@@ -48,6 +51,7 @@ function linkifyText(text: string): React.ReactNode[] {
 }
 
 export function FocusedTask({ task }: FocusedTaskProps) {
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
   if (!task) {
     return (
       <div className="flex h-full flex-col items-center justify-center">
@@ -89,7 +93,7 @@ export function FocusedTask({ task }: FocusedTaskProps) {
           <div>
             <h3 className="mb-1 text-sm font-medium">Due Date</h3>
             <p className="text-muted-foreground">
-              {format(task.dueDate, "PPP")}
+              {formatDueDateLong(task.dueDate, timeZone)}
             </p>
           </div>
         )}

@@ -9,7 +9,11 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 
-import { getAppVersion, getVersionGithubUrl } from "@/lib/version";
+import {
+  GITHUB_REPO_URL,
+  getAppVersion,
+  getVersionGithubUrl,
+} from "@/lib/version";
 
 export default function OpenSourceHomePage() {
   const { data: session } = useSession();
@@ -28,7 +32,7 @@ export default function OpenSourceHomePage() {
       {/* GitHub Button in Top Right */}
       <div className="absolute right-4 top-4">
         <Link
-          href="https://github.com/dotnetfactory/fluid-calendar"
+          href={GITHUB_REPO_URL}
           target="_blank"
         >
           <Button size="sm" className="bg-black text-white hover:bg-gray-800">
@@ -53,7 +57,7 @@ export default function OpenSourceHomePage() {
         <div className="mb-8">
           <Image
             src="/logo.svg"
-            alt="FluidCalendar Logo"
+            alt="Momentum Logo"
             width={64}
             height={64}
             className="h-16 w-16"
@@ -63,16 +67,15 @@ export default function OpenSourceHomePage() {
 
         {/* Title and Description */}
         <h1 className="mb-6 text-center text-5xl font-bold md:text-6xl">
-          <span className="text-blue-600">FluidCalendar</span>
-          <span className="text-gray-800"> Open Source</span>
+          <span className="text-blue-600">Momentum</span>
         </h1>
         <p className="mx-auto mb-4 max-w-3xl text-center text-xl text-gray-600">
-          The open-source intelligent calendar that adapts to your workflow.
-          Experience seamless task scheduling powered by AI, designed to make
-          your time management effortless.
+          A self-hosted auto-scheduler for your tasks and calendar. Add tasks
+          with a duration, deadline and priority; Momentum places them into
+          your free time and re-plans whenever anything changes.
         </p>
         <p className="mb-8 text-center text-lg text-gray-500">
-          Your open-source alternative to Motion
+          Deterministic scheduling, no AI
         </p>
 
         {/* Login and GitHub Buttons */}
@@ -84,10 +87,7 @@ export default function OpenSourceHomePage() {
           >
             {session ? "Go to App" : "Sign In"}
           </Button>
-          <Link
-            href="https://github.com/dotnetfactory/fluid-calendar"
-            target="_blank"
-          >
+          <Link href={GITHUB_REPO_URL} target="_blank">
             <Button size="lg" variant="outline" className="px-8 py-6 text-lg">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -131,7 +131,7 @@ export default function OpenSourceHomePage() {
             <div>
               <h3 className="mb-2 text-xl font-semibold">Self-Hosting</h3>
               <p className="text-gray-600">
-                Host FluidCalendar on your own servers for complete control over
+                Host Momentum on your own servers for complete control over
                 your data and infrastructure.
               </p>
             </div>
@@ -159,7 +159,7 @@ export default function OpenSourceHomePage() {
               <h3 className="mb-2 text-xl font-semibold">Full Source Access</h3>
               <p className="text-gray-600">
                 Access and modify the complete source code to customize
-                FluidCalendar to your specific needs.
+                Momentum to your specific needs.
               </p>
             </div>
           </div>
@@ -183,10 +183,12 @@ export default function OpenSourceHomePage() {
               </svg>
             </div>
             <div>
-              <h3 className="mb-2 text-xl font-semibold">Community Driven</h3>
+              <h3 className="mb-2 text-xl font-semibold">
+                Hard Deadlines Are Real
+              </h3>
               <p className="text-gray-600">
-                Join a vibrant community of developers and users contributing to
-                the future of FluidCalendar.
+                If a task can&apos;t finish in time it is flagged, never
+                silently scheduled late.
               </p>
             </div>
           </div>
@@ -195,7 +197,7 @@ export default function OpenSourceHomePage() {
         {/* Get Started Section */}
         <div className="mt-12 w-full max-w-3xl rounded-lg border border-gray-200 bg-gray-50 p-8">
           <h2 className="mb-4 text-center text-2xl font-bold">
-            Get Started with FluidCalendar
+            Get Started with Momentum
           </h2>
           <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
             <Button
@@ -206,7 +208,7 @@ export default function OpenSourceHomePage() {
               {session ? "Go to Your Calendar" : "Sign In to Your Instance"}
             </Button>
             <Link
-              href="https://github.com/dotnetfactory/fluid-calendar#installation"
+              href={`${GITHUB_REPO_URL}#running-locally`}
               target="_blank"
             >
               <Button size="lg" variant="outline" className="px-8 py-4">
@@ -224,17 +226,17 @@ export default function OpenSourceHomePage() {
             <div className="mb-4 flex items-center space-x-2 md:mb-0">
               <Image
                 src="/logo.svg"
-                alt="FluidCalendar Logo"
+                alt="Momentum Logo"
                 width={24}
                 height={24}
                 className="text-blue-600"
               />
-              <span className="text-xl font-bold">FluidCalendar</span>
+              <span className="text-xl font-bold">Momentum</span>
             </div>
             <div className="text-sm text-gray-500">
-              Licensed under MIT. Contribute on{" "}
+              Licensed under AGPL-3.0. Source on{" "}
               <a
-                href="https://github.com/dotnetfactory/fluid-calendar"
+                href={GITHUB_REPO_URL}
                 className="text-blue-600 hover:underline"
                 target="_blank"
                 rel="noopener noreferrer"

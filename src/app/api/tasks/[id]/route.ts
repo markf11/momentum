@@ -12,10 +12,12 @@ import {
   deleteTaskBlockEvent,
   schedulePushTaskBlock,
 } from "@/lib/task-block-push";
+import { InvalidTaskDateError, resolveTaskDateFields } from "@/lib/task-dates";
 import {
   ChangeType,
   TaskChangeTracker,
 } from "@/lib/task-sync/task-change-tracker";
+import { getUserTimeZone } from "@/lib/user-timezone";
 import { normalizeRecurrenceRule } from "@/lib/utils/normalize-recurrence-rules";
 
 import { TaskStatus } from "@/types/task";
@@ -98,7 +100,21 @@ export async function PUT(
     logger.info(`Update payload for task ${id}`, { payload: json }, LOG_SOURCE);
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { tagIds, project, projectId, userId: _, ...updates } = json;
+    const { tagIds, project, projectId, userId: _, ...rawUpdates } = json;
+
+    // Date-only due dates mean end of that day in the user's timezone.
+    let updates: typeof rawUpdates;
+    try {
+      updates = resolveTaskDateFields(
+        rawUpdates,
+        await getUserTimeZone(userId)
+      );
+    } catch (error) {
+      if (error instanceof InvalidTaskDateError) {
+        return new NextResponse(error.message, { status: 400 });
+      }
+      throw error;
+    }
 
     // Set completedAt when task is marked as completed
     if (

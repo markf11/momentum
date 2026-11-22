@@ -10,6 +10,8 @@ import {
 } from "@/lib/schedule-status";
 import { cn } from "@/lib/utils";
 
+import { useSettingsStore } from "@/store/settings";
+
 import { Task, TaskStatus } from "@/types/task";
 
 interface NeedsAttentionProps {
@@ -26,6 +28,7 @@ const FIX_HINT: Record<string, string> = {
 
 /** D13: problem tasks surfaced at the top of the task list. */
 export function NeedsAttention({ tasks, onEdit }: NeedsAttentionProps) {
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
   const flagged = tasks
     .filter(
       (task) =>
@@ -79,7 +82,7 @@ export function NeedsAttention({ tasks, onEdit }: NeedsAttentionProps) {
                       : "text-amber-700 dark:text-amber-400"
                   )}
                 >
-                  {formatScheduleIssue(task.scheduleIssue)}
+                  {formatScheduleIssue(task.scheduleIssue, timeZone)}
                   {task.scheduledEnd && (
                     <span className="ml-1 text-muted-foreground">
                       (ETA {format(newDate(task.scheduledEnd), "MMM d, p")})

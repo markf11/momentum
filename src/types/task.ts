@@ -94,18 +94,47 @@ export interface ScheduledBlock {
   status: ScheduleStatus;
 }
 
+/**
+ * Task dates as sent to the API: an instant, or a date-only "YYYY-MM-DD" /
+ * zone-less "YYYY-MM-DDTHH:mm" that the API resolves in the user's timezone
+ * (a date-only due date is the end of that day).
+ */
+export type TaskDateInput = Date | string | null;
+
 export interface NewTask
-  extends Omit<Task, "id" | "createdAt" | "updatedAt" | "tags" | "project"> {
+  extends Omit<
+    Task,
+    | "id"
+    | "createdAt"
+    | "updatedAt"
+    | "tags"
+    | "project"
+    | "dueDate"
+    | "startDate"
+  > {
   tagIds?: string[];
   isAutoScheduled: boolean;
   scheduleLocked: boolean;
+  dueDate?: TaskDateInput;
+  startDate?: TaskDateInput;
 }
 
 export interface UpdateTask
   extends Partial<
-    Omit<Task, "id" | "createdAt" | "updatedAt" | "tags" | "project">
+    Omit<
+      Task,
+      | "id"
+      | "createdAt"
+      | "updatedAt"
+      | "tags"
+      | "project"
+      | "dueDate"
+      | "startDate"
+    >
   > {
   tagIds?: string[];
+  dueDate?: TaskDateInput;
+  startDate?: TaskDateInput;
 }
 
 export type NewTag = Omit<Tag, "id">;

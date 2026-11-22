@@ -24,10 +24,16 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { format, newDate } from "@/lib/date-utils";
+import {
+  dateKeyInTimeZone,
+  dueDateFormParts,
+  dueDateFormValue,
+} from "@/lib/task-dates";
 import { RecurrenceConverterFactory } from "@/lib/task-sync/recurrence/recurrence-converter-factory";
 import { cn } from "@/lib/utils";
 
 import { useProjectStore } from "@/store/project";
+import { useSettingsStore } from "@/store/settings";
 
 import {
   EnergyLevel,
@@ -90,10 +96,13 @@ export function TaskModal({
   initialProjectId,
 }: TaskModalProps) {
   const { projects } = useProjectStore();
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<TaskStatus>(TaskStatus.TODO);
   const [dueDate, setDueDate] = useState<string>("");
+  // Optional; empty means the due date is the end of that day.
+  const [dueTime, setDueTime] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [duration, setDuration] = useState<string>("");
   const [energyLevel, setEnergyLevel] = useState<EnergyLevel | "">("");
@@ -127,6 +136,7 @@ export function TaskModal({
     setDescription("");
     setStatus(TaskStatus.TODO);
     setDueDate("");
+    setDueTime("");
     setStartDate("");
     setDuration("30");
     setEnergyLevel("");
@@ -157,16 +167,17 @@ export function TaskModal({
       setTitle(task.title);
       setDescription(task.description || "");
       setStatus(task.status);
-      // Handle date string from API
+      // Stored instants are shown in the user's timezone
       if (task.dueDate) {
-        const date = newDate(task.dueDate);
-        setDueDate(date.toISOString().split("T")[0]);
+        const parts = dueDateFormParts(task.dueDate, timeZone);
+        setDueDate(parts.date);
+        setDueTime(parts.time);
       } else {
         setDueDate("");
+        setDueTime("");
       }
       if (task.startDate) {
-        const date = newDate(task.startDate);
-        setStartDate(date.toISOString().split("T")[0]);
+        setStartDate(dateKeyInTimeZone(task.startDate, timeZone));
       } else {
         setStartDate("");
       }
@@ -185,7 +196,7 @@ export function TaskModal({
     } else if (!task && isOpen) {
       resetForm();
     }
-  }, [task, isOpen, initialProjectId, resetForm]);
+  }, [task, isOpen, initialProjectId, resetForm, timeZone]);
 
   // Focus title input when modal opens
   useEffect(() => {
@@ -206,8 +217,10 @@ export function TaskModal({
         title: title.trim(),
         description: description.trim() || undefined,
         status,
-        dueDate: dueDate ? newDate(dueDate) : null,
-        startDate: startDate ? newDate(startDate) : null,
+        // Date-only / zone-less values; the API resolves them in the
+        // user's timezone (date-only due = end of that day).
+        dueDate: dueDateFormValue(dueDate, dueTime),
+        startDate: startDate || null,
         duration: durationMinutes,
         minChunkMinutes: minChunkMinutes ? parseInt(minChunkMinutes, 10) : null,
         hardDeadline: Boolean(dueDate) && hardDeadline,
@@ -297,12 +310,30 @@ export function TaskModal({
 
             <div>
               <Label htmlFor="dueDate">Due Date</Label>
-              <Input
-                type="date"
-                id="dueDate"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  id="dueDate"
+                  value={dueDate}
+                  onChange={(e) => {
+                    setDueDate(e.target.value);
+                    if (!e.target.value) setDueTime("");
+                  }}
+                  className="min-w-0 flex-1"
+                />
+                <Input
+                  type="time"
+                  id="dueTime"
+                  aria-label="Due time"
+                  value={dueTime}
+                  onChange={(e) => setDueTime(e.target.value)}
+                  disabled={!dueDate}
+                  className="w-[6.5rem] shrink-0"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Optional time; otherwise due by end of day
+              </p>
             </div>
 
             <div>
@@ -583,8 +614,7 @@ export function TaskModal({
                   setIsRecurring(checked as boolean);
                   if (checked) {
                     if (!dueDate) {
-                      const today = newDate();
-                      setDueDate(today.toISOString().split("T")[0]);
+                      setDueDate(dateKeyInTimeZone(newDate(), timeZone));
                     }
                     if (!recurrenceRule) {
                       setRecurrenceRule(

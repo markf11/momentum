@@ -36,9 +36,9 @@ export async function sendPasswordResetEmail({
 
     // Send the email using the appropriate service
     const { jobId } = await EmailService.sendEmail({
-      from: EmailService.formatSender("FluidCalendar"),
+      from: EmailService.formatSender("Momentum"),
       to: email,
-      subject: "Reset Your FluidCalendar Password",
+      subject: "Reset Your Momentum Password",
       html,
     });
 

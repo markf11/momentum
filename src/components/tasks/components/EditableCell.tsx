@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-// Import missing functions
-import { isThisWeek, isThisYear, isToday, isTomorrow } from "date-fns";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { HiCheck, HiExclamation, HiX } from "react-icons/hi";
@@ -17,14 +15,14 @@ import {
 } from "@/components/ui/select";
 
 import {
-  createUTCMidnightDate,
-  format,
-  isFutureDate,
-  newDate,
-  newDateFromYMD,
-} from "@/lib/date-utils";
+  dueDateFormParts,
+  formatTaskDate,
+  resolveTaskDateInput,
+  zonedDayAsLocalDate,
+} from "@/lib/task-dates";
 
 import { useProjectStore } from "@/store/project";
+import { useSettingsStore } from "@/store/settings";
 
 import { EnergyLevel, Priority, Task, TimePreference } from "@/types/task";
 
@@ -53,6 +51,28 @@ export function EditableCell({
   const [editValue, setEditValue] = useState(value);
   const editRef = useRef<HTMLDivElement>(null);
   const { projects } = useProjectStore();
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
+  const formatContextualDate = (date: Date | string, kind: "due" | "start") =>
+    formatTaskDate(date, timeZone, { kind });
+
+  // The picker yields a local calendar day; store that day in the user's
+  // timezone (end of day for due dates, keeping an explicit due time).
+  const pickedDayToInstant = (
+    picked: Date | null,
+    kind: "due" | "start"
+  ): Date | null => {
+    if (!picked) return null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const day = `${picked.getFullYear()}-${pad(picked.getMonth() + 1)}-${pad(
+      picked.getDate()
+    )}`;
+    const time =
+      kind === "due" && value ? dueDateFormParts(value, timeZone).time : "";
+    return (
+      resolveTaskDateInput(time ? `${day}T${time}` : day, timeZone, kind) ??
+      null
+    );
+  };
 
   useEffect(() => {
     setEditValue(value);
@@ -185,7 +205,7 @@ export function EditableCell({
           <span
             className={`group flex items-center gap-1 text-sm ${
               value
-                ? formatContextualDate(newDate(value)).isOverdue
+                ? formatContextualDate(value, "due").isOverdue
                   ? "text-destructive"
                   : "text-muted-foreground"
                 : "text-muted-foreground/70"
@@ -193,8 +213,8 @@ export function EditableCell({
           >
             {value ? (
               <>
-                {formatContextualDate(newDate(value)).text}
-                {formatContextualDate(newDate(value)).isOverdue && (
+                {formatContextualDate(value, "due").text}
+                {formatContextualDate(value, "due").isOverdue && (
                   <HiExclamation className="h-4 w-4 text-destructive" />
                 )}
               </>
@@ -209,7 +229,7 @@ export function EditableCell({
             }`}
           >
             {value
-              ? formatContextualDate(newDate(value)).text
+              ? formatContextualDate(value, "start").text
               : "Set start date"}
           </span>
         ) : field === "projectId" ? (
@@ -342,17 +362,11 @@ export function EditableCell({
         <div className="flex items-center gap-2">
           <DatePicker
             selected={
-              editValue
-                ? newDateFromYMD(
-                    new Date(editValue).getUTCFullYear(),
-                    new Date(editValue).getUTCMonth(),
-                    new Date(editValue).getUTCDate()
-                  )
-                : null
+              editValue ? zonedDayAsLocalDate(editValue, timeZone) : null
             }
             onChange={(date) => {
               // Just update the local state, don't save yet
-              setEditValue(date);
+              setEditValue(pickedDayToInstant(date, "due"));
             }}
             className="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
             dateFormat="MMM d, yyyy"
@@ -363,10 +377,9 @@ export function EditableCell({
             size="sm"
             variant="ghost"
             onClick={() => {
-              // Use the date-utils function to create a consistent UTC midnight date
               onSave({
                 ...task,
-                [field]: createUTCMidnightDate(editValue),
+                dueDate: editValue ?? null,
               });
               setIsEditing(false);
             }}
@@ -387,17 +400,11 @@ export function EditableCell({
         <div className="flex items-center gap-2">
           <DatePicker
             selected={
-              editValue
-                ? newDateFromYMD(
-                    new Date(editValue).getUTCFullYear(),
-                    new Date(editValue).getUTCMonth(),
-                    new Date(editValue).getUTCDate()
-                  )
-                : null
+              editValue ? zonedDayAsLocalDate(editValue, timeZone) : null
             }
             onChange={(date) => {
               // Just update the local state, don't save yet
-              setEditValue(date);
+              setEditValue(pickedDayToInstant(date, "start"));
             }}
             className="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
             dateFormat="MMM d, yyyy"
@@ -408,10 +415,9 @@ export function EditableCell({
             size="sm"
             variant="ghost"
             onClick={() => {
-              // Use the date-utils function to create a consistent UTC midnight date
               onSave({
                 ...task,
-                [field]: createUTCMidnightDate(editValue),
+                startDate: editValue ?? null,
               });
               setIsEditing(false);
             }}
@@ -492,35 +498,3 @@ export function EditableCell({
     </div>
   );
 }
-
-// Helper functions
-const formatContextualDate = (date: Date) => {
-  // For UTC midnight dates (e.g. 2025-03-10T00:00:00.000Z),
-  // just use the date components to create a local date
-  const localDate = newDateFromYMD(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate()
-  );
-  const now = newDate();
-  now.setHours(0, 0, 0, 0);
-
-  const isOverdue = localDate < now && !isToday(localDate);
-  const isFuture = isFutureDate(localDate);
-  let text = "";
-  if (isToday(localDate)) {
-    text = "Today";
-  } else if (isTomorrow(localDate)) {
-    text = "Tomorrow";
-  } else if (isThisWeek(localDate)) {
-    text = format(localDate, "EEEE");
-  } else if (isThisYear(localDate)) {
-    text = format(localDate, "MMM d");
-  } else {
-    text = format(localDate, "MMM d, yyyy");
-  }
-  if (isOverdue) {
-    text = `Overdue: ${text}`;
-  }
-  return { text, isOverdue, isFuture };
-};
