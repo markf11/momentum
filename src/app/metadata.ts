@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "FluidCalendar",
-  description: "A modern calendar and task management application",
+  title: "Momentum",
+  description: "Self-hosted auto-scheduler for your tasks and calendar",
   icons: {
     icon: [
       { url: "/logo.svg", type: "image/svg+xml", sizes: "any" },

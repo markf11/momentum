@@ -43,7 +43,7 @@ export class EmailService {
         LOG_SOURCE
       );
 
-      const fromEmail = EmailService.formatSender("FluidCalendar");
+      const fromEmail = EmailService.formatSender("Momentum");
 
       const emailToSend = {
         from: fromEmail,
@@ -105,7 +105,7 @@ export class EmailService {
    */
   static formatSender(displayName: string, email?: string): string {
     const fromEmail =
-      email || process.env.RESEND_FROM_EMAIL || "noreply@fluidcalendar.com";
+      email || process.env.RESEND_FROM_EMAIL || "noreply@localhost";
     return `${displayName} <${fromEmail}>`;
   }
 }

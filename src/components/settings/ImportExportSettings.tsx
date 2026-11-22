@@ -45,7 +45,7 @@ export function ImportExportSettings() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `fluid-calendar-tasks-${
+      link.download = `momentum-tasks-${
         new Date().toISOString().split("T")[0]
       }.json`;
       document.body.appendChild(link);
