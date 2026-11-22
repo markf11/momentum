@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 
 import { format, isBefore, newDate } from "@/lib/date-utils";
 import { logger } from "@/lib/logger";
+import { formatInZone } from "@/lib/task-dates";
 import { cn } from "@/lib/utils";
 
 import { useFocusModeStore } from "@/store/focusMode";
+import { useSettingsStore } from "@/store/settings";
 import { useTaskStore } from "@/store/task";
 
 import { Task, TaskStatus } from "@/types/task";
@@ -16,6 +18,7 @@ import { Task, TaskStatus } from "@/types/task";
 export function TaskQueue() {
   const { switchToTask, currentTaskId, getQueuedTasks } = useFocusModeStore();
   const { tasks } = useTaskStore();
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
 
   // State to track expanded sections
   const [expandedSections, setExpandedSections] = useState<{
@@ -121,7 +124,7 @@ export function TaskQueue() {
           <div className="ml-1 flex shrink-0 items-center space-x-1">
             {task.status !== TaskStatus.COMPLETED && task.dueDate && (
               <span className="rounded bg-red-200 px-1.5 py-0.5 text-xs font-medium text-red-900 dark:bg-red-900/50 dark:text-red-100">
-                {format(task.dueDate, "MM/dd")}
+                {formatInZone(task.dueDate, timeZone, "MM/dd")}
               </span>
             )}
 

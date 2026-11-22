@@ -8,10 +8,12 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { requestReplan } from "@/lib/replan-coordinator";
 import { schedulePushTaskBlock } from "@/lib/task-block-push";
+import { InvalidTaskDateError, resolveTaskDateFields } from "@/lib/task-dates";
 import {
   ChangeType,
   TaskChangeTracker,
 } from "@/lib/task-sync/task-change-tracker";
+import { getUserTimeZone } from "@/lib/user-timezone";
 import { normalizeRecurrenceRule } from "@/lib/utils/normalize-recurrence-rules";
 
 import { EnergyLevel, TaskStatus, TimePreference } from "@/types/task";
@@ -105,7 +107,21 @@ export async function POST(request: NextRequest) {
     const userId = auth.userId;
 
     const json = await request.json();
-    const { tagIds, recurrenceRule, ...taskData } = json;
+    const { tagIds, recurrenceRule, ...rawTaskData } = json;
+
+    // Date-only due dates mean end of that day in the user's timezone.
+    let taskData: typeof rawTaskData;
+    try {
+      taskData = resolveTaskDateFields(
+        rawTaskData,
+        await getUserTimeZone(userId)
+      );
+    } catch (error) {
+      if (error instanceof InvalidTaskDateError) {
+        return new NextResponse(error.message, { status: 400 });
+      }
+      throw error;
+    }
 
     // Normalize and validate recurrence rule if provided
     const standardizedRecurrenceRule = recurrenceRule

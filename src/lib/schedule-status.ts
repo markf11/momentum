@@ -1,4 +1,5 @@
 import { format } from "@/lib/date-utils";
+import { formatInZone } from "@/lib/task-dates";
 
 export type AttentionTone = "red" | "amber";
 
@@ -37,10 +38,18 @@ export function attentionRank(status: string | null | undefined): number {
 
 const ISO_INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 
-/** The engine reports instants as ISO strings; show them in local time. */
-export function formatScheduleIssue(issue: string | null | undefined): string {
+/**
+ * The engine reports instants as ISO strings; show them in the user's
+ * timezone when given, else local time.
+ */
+export function formatScheduleIssue(
+  issue: string | null | undefined,
+  timeZone?: string
+): string {
   if (!issue) return "";
   return issue.replace(ISO_INSTANT, (iso) =>
-    format(new Date(iso), "EEE MMM d, p")
+    timeZone
+      ? formatInZone(iso, timeZone, "EEE MMM d, p")
+      : format(new Date(iso), "EEE MMM d, p")
   );
 }

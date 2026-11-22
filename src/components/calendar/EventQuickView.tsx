@@ -12,6 +12,7 @@ import {
 } from "react-icons/io5";
 
 import { format, isFutureDate, newDate } from "@/lib/date-utils";
+import { formatInZone, isEndOfDayInTimeZone } from "@/lib/task-dates";
 import {
   formatScheduleIssue,
   scheduleStatusBadge,
@@ -25,6 +26,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+import { useSettingsStore } from "@/store/settings";
 import { useTaskStore } from "@/store/task";
 
 import { AttendeeStatus, CalendarEvent } from "@/types/calendar";
@@ -93,6 +95,7 @@ export function EventQuickView({
     : null;
 
   const isOverdue = taskItem && isTaskOverdue(taskItem);
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
   // The quick view holds a snapshot; lock state and schedule status come
   // from the live store so they update after a toggle or re-plan.
   const liveTask = useTaskStore((state) =>
@@ -283,7 +286,7 @@ export function EventQuickView({
                   )}
                 >
                   <span className="font-semibold">{scheduleBadge.label}: </span>
-                  {formatScheduleIssue(scheduleTask?.scheduleIssue)}
+                  {formatScheduleIssue(scheduleTask?.scheduleIssue, timeZone)}
                 </div>
               )}
               <div className="flex items-center justify-between">
@@ -298,7 +301,14 @@ export function EventQuickView({
                         "text-primary font-medium"
                       )}
                     >
-                      Due {format(newDate(taskItem.dueDate), "PPp")}
+                      Due{" "}
+                      {formatInZone(
+                        taskItem.dueDate,
+                        timeZone,
+                        isEndOfDayInTimeZone(taskItem.dueDate, timeZone)
+                          ? "PP"
+                          : "PPp"
+                      )}
                       {isOverdue && " (OVERDUE)"}
                       {isFutureDate(taskItem.dueDate) && " (UPCOMING)"}
                     </span>

@@ -4,8 +4,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { newDate, normalizeAllDayDate } from "@/lib/date-utils";
+import { zonedDayAsLocalDate } from "@/lib/task-dates";
 import { DEFAULT_TASK_COLOR } from "@/lib/task-utils";
 
+import { useSettingsStore } from "@/store/settings";
 import { useTaskStore } from "@/store/task";
 
 import {
@@ -907,13 +909,11 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
           const scheduledStart = newDate(task.scheduledStart);
           return scheduledStart >= startDay && scheduledStart <= endDay;
         } else if (task.dueDate) {
-          // For non-auto-scheduled tasks, use due date logic
-          const taskDueDate = newDate(task.dueDate);
-          const localDate = newDate(taskDueDate);
-          localDate.setMinutes(
-            localDate.getMinutes() + localDate.getTimezoneOffset()
+          // For non-auto-scheduled tasks, use the due day in the user's zone
+          const localDate = zonedDayAsLocalDate(
+            task.dueDate,
+            useSettingsStore.getState().user.timeZone
           );
-          localDate.setHours(0, 0, 0, 0);
           return localDate >= startDay && localDate <= endDay;
         }
         return false;
@@ -954,13 +954,12 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
             },
           };
         } else {
-          // For non-auto-scheduled tasks, use the existing due date logic
-          const taskDueDate = newDate(task.dueDate!);
-          const localDate = newDate(taskDueDate);
-          localDate.setMinutes(
-            localDate.getMinutes() + localDate.getTimezoneOffset()
+          // For non-auto-scheduled tasks, show it on its due day in the
+          // user's timezone
+          const eventDate = zonedDayAsLocalDate(
+            task.dueDate!,
+            useSettingsStore.getState().user.timeZone
           );
-          const eventDate = newDate(localDate);
           eventDate.setHours(9, 0, 0, 0);
 
           return {

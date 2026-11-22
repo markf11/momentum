@@ -3,17 +3,11 @@
 import { useDraggable } from "@dnd-kit/core";
 import { HiClock, HiLockClosed, HiPencil, HiTrash } from "react-icons/hi";
 
-import {
-  format,
-  isFutureDate,
-  isThisWeek,
-  isThisYear,
-  isToday,
-  isTomorrow,
-  newDate,
-  newDateFromYMD,
-} from "@/lib/date-utils";
+import { format, newDate } from "@/lib/date-utils";
+import { formatTaskDate } from "@/lib/task-dates";
 import { cn } from "@/lib/utils";
+
+import { useSettingsStore } from "@/store/settings";
 
 import { Task, TimePreference } from "@/types/task";
 
@@ -46,36 +40,9 @@ const formatEnumValue = (value: string) => {
     .join(" ");
 };
 
-const formatContextualDate = (date: Date) => {
-  const localDate = newDateFromYMD(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate()
-  );
-  const now = newDate();
-  now.setHours(0, 0, 0, 0);
-
-  const isOverdue = localDate < now && !isToday(localDate);
-  const isFuture = isFutureDate(localDate);
-  let text = "";
-  if (isToday(localDate)) {
-    text = "Today";
-  } else if (isTomorrow(localDate)) {
-    text = "Tomorrow";
-  } else if (isThisWeek(localDate)) {
-    text = format(localDate, "EEEE");
-  } else if (isThisYear(localDate)) {
-    text = format(localDate, "MMM d");
-  } else {
-    text = format(localDate, "MMM d, yyyy");
-  }
-  if (isOverdue) {
-    text = `Overdue: ${text}`;
-  }
-  return { text, isOverdue, isFuture };
-};
-
 export function BoardTask({ task, onEdit, onDelete }: BoardTaskProps) {
+  const timeZone = useSettingsStore((state) => state.user.timeZone);
+  const due = task.dueDate ? formatTaskDate(task.dueDate, timeZone) : null;
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: task.id,
@@ -171,15 +138,13 @@ export function BoardTask({ task, onEdit, onDelete }: BoardTaskProps) {
               <span className="text-muted-foreground">{task.duration}m</span>
             )}
 
-            {task.dueDate && (
+            {due && (
               <span
                 className={cn(
-                  formatContextualDate(newDate(task.dueDate)).isOverdue
-                    ? "text-destructive"
-                    : "text-muted-foreground"
+                  due.isOverdue ? "text-destructive" : "text-muted-foreground"
                 )}
               >
-                {formatContextualDate(newDate(task.dueDate)).text}
+                {due.text}
               </span>
             )}
 
