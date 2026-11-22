@@ -129,4 +129,18 @@ The Motion model:
 3. Wire it into the app: local events + tasks, chunk blocks on the calendar, Needs attention section.
 4. Verify by booting and driving the API/UI. No external integrations.
 
+## v1 gaps closed (2026-11-22)
+
+Built by four parallel agents on separate branches, merged into `momentum-v1`, then verified together (tsc clean, 383 tests passing / 1 skipped across 49 suites, lint clean, `next build` OK, live API run).
+
+- **Due dates (fixes D6 in practice):** a date-only due date means 23:59:59.999 in the user's timezone (New York `2026-11-23` → `2026-11-24T04:59:59.999Z`). The task form has an optional due time. Date-only start dates mean 00:00 local. Existing UTC-midnight rows are not migrated.
+- **Branding:** FluidCalendar sponsor box and product name removed from the app UI; attribution kept in README/LICENSE.
+- **One-click fixes (D13):** push deadline +1 day, make deadline soft, shorten to fit (uses the new `Task.scheduleFitMinutes`), shorten…, turn off auto-schedule.
+- **Partial completion (D16e):** new `Task.remainingMinutes`; "Done with this chunk" and "Log time"; task completes at 0; editing duration keeps worked minutes.
+- **Background re-plans (D15):** in-process loop via `src/instrumentation.ts`, every 15 min (`MOMENTUM_TICK_MS`), nightly full re-plan at 03:00 local (`MOMENTUM_NIGHTLY_HOUR`). Expired locks are unlocked and rescheduled (D7). Off during build/tests or with `MOMENTUM_DISABLE_BACKGROUND=1`.
+- **Repeating busy events:** every occurrence in the 31-day window blocks time, DST-safe, with EXDATE support.
+- **Break rule (D12):** now a final-schedule invariant; enforced by a 200-workload randomised property test.
+- **Settings:** energy levels and project grouping removed from the UI (D4); "Calendars to consider" now filters busy events.
+
+Still open: old UTC-midnight due dates aren't migrated; synced (Google/Outlook/CalDAV) date handling untouched; the Needs-attention ETA uses the browser's timezone; the nightly re-plan is unit-tested only.
 
