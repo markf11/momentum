@@ -11,7 +11,7 @@ const read = (rel: string) => readFileSync(join(repoRoot, rel), "utf8");
 
 describe("Google OAuth setup docs (issue #76)", () => {
   describe("README", () => {
-    const readme = read("README.md");
+    const readme = read("docs/FLUIDCALENDAR-README.md");
     // Limit assertions to the Google Cloud Setup section so unrelated mentions
     // elsewhere in the README cannot mask a missing instruction.
     const googleSection = (() => {

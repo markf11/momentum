@@ -12,7 +12,7 @@ const read = (rel: string) => readFileSync(join(repoRoot, rel), "utf8");
 
 describe("Outlook setup docs (issue #97)", () => {
   describe("README", () => {
-    const readme = read("README.md");
+    const readme = read("docs/FLUIDCALENDAR-README.md");
     // Scope assertions to the Microsoft Outlook Setup section so unrelated
     // mentions elsewhere cannot mask a wrong/missing instruction.
     const outlookSection = (() => {
@@ -62,7 +62,7 @@ describe("Outlook setup docs (issue #97)", () => {
   // creep back into any one of them.
   describe("No stale Outlook callback variant in any setup doc", () => {
     const docs = [
-      "README.md",
+      "docs/FLUIDCALENDAR-README.md",
       "docs/_old/outlook.md",
       "docs/self-hosting-setup-checklist.md",
     ];

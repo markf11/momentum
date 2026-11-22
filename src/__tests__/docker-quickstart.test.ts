@@ -82,7 +82,7 @@ describe("Docker quick-start (issue #151)", () => {
   });
 
   describe("README quick-start docs", () => {
-    const readme = read("README.md");
+    const readme = read("docs/FLUIDCALENDAR-README.md");
     // Scope assertions to the Docker quick-start section.
     const section = (() => {
       const idx = readme.indexOf("### Quick Start with Docker");
