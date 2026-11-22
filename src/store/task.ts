@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { isSaasEnabled } from "@/lib/config";
+import { logMinutes } from "@/lib/remaining-time";
 
 import {
   NewTag,
@@ -10,6 +11,7 @@ import {
   Tag,
   Task,
   TaskFilters,
+  TaskStatus,
   UpdateTask,
 } from "@/types/task";
 
@@ -37,6 +39,16 @@ interface TaskState {
     resize?: boolean
   ) => Promise<void>;
   setTaskLocked: (id: string, locked: boolean) => Promise<void>;
+  /** D13 one-click fix: optimistic task update, then the usual re-plan. */
+  applyTaskFix: (
+    id: string,
+    updates: UpdateTask,
+    optimistic?: Partial<Task>
+  ) => Promise<void>;
+  /** D16e: subtract worked minutes; the task completes at zero. */
+  logTaskTime: (id: string, minutes: number) => Promise<void>;
+  /** D16e: "Done with this chunk". */
+  completeScheduledBlock: (blockId: string) => Promise<void>;
 
   // Tag actions
   fetchTags: () => Promise<void>;
@@ -212,6 +224,109 @@ export const useTaskStore = create<TaskState>()(
 
       setTaskLocked: async (id, locked) => {
         await get().updateTask(id, { scheduleLocked: locked });
+      },
+
+      applyTaskFix: async (id, updates, optimistic = {}) => {
+        const previous = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === id ? { ...task, ...updates, ...optimistic } : task
+          ),
+        }));
+        try {
+          const response = await fetch(`/api/tasks/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates),
+          });
+          if (!response.ok) throw new Error("Failed to apply fix");
+          const updatedTask = await response.json();
+          set((state) => ({
+            tasks: state.tasks.map((task) =>
+              task.id === id ? { ...updatedTask, ...optimistic } : task
+            ),
+          }));
+        } catch (error) {
+          set({ tasks: previous, error: error as Error });
+          throw error;
+        }
+        await get().triggerScheduleAllTasks();
+      },
+
+      logTaskTime: async (id, minutes) => {
+        const previous = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== id) return task;
+            const result = logMinutes(task, minutes);
+            return {
+              ...task,
+              remainingMinutes: result.remainingMinutes,
+              ...(result.completed && !task.isRecurring
+                ? { status: TaskStatus.COMPLETED }
+                : {}),
+            };
+          }),
+        }));
+        try {
+          const response = await fetch(`/api/tasks/${id}/log-time`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ minutes }),
+          });
+          if (!response.ok) throw new Error("Failed to log time");
+          const updatedTask = await response.json();
+          set((state) => ({
+            tasks: state.tasks.map((task) =>
+              task.id === id ? updatedTask : task
+            ),
+          }));
+        } catch (error) {
+          set({ tasks: previous, error: error as Error });
+          throw error;
+        }
+        await get().triggerScheduleAllTasks();
+      },
+
+      completeScheduledBlock: async (blockId) => {
+        const { tasks, scheduledBlocks } = get();
+        const block = scheduledBlocks.find((b) => b.id === blockId);
+        if (!block) return;
+        const minutes = Math.round(
+          (new Date(block.end).getTime() - new Date(block.start).getTime()) /
+            60_000
+        );
+        set({
+          scheduledBlocks: scheduledBlocks.filter((b) => b.id !== blockId),
+          tasks: tasks.map((task) => {
+            if (task.id !== block.taskId) return task;
+            const result = logMinutes(task, minutes);
+            return {
+              ...task,
+              remainingMinutes: result.remainingMinutes,
+              ...(result.completed && !task.isRecurring
+                ? { status: TaskStatus.COMPLETED }
+                : {}),
+            };
+          }),
+        });
+        try {
+          const response = await fetch(
+            `/api/scheduled-blocks/${blockId}/complete`,
+            { method: "POST" }
+          );
+          if (!response.ok) throw new Error("Failed to complete chunk");
+          const updatedTask = await response.json();
+          set((state) => ({
+            tasks: state.tasks.map((task) =>
+              task.id === updatedTask.id ? updatedTask : task
+            ),
+          }));
+        } catch (error) {
+          set({ tasks, scheduledBlocks, error: error as Error });
+          throw error;
+        }
+        await get().triggerScheduleAllTasks();
       },
 
       setFilters: (filters: Partial<TaskFilters>) => {

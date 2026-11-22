@@ -65,6 +65,7 @@ export function DayView({ currentDate, onDateClick }: DayViewProps) {
   const tasks = useTaskStore((state) => state.tasks);
   const [quickViewItem, setQuickViewItem] = useState<CalendarEvent | Task>();
   const [isTask, setIsTask] = useState(false);
+  const [quickViewBlockId, setQuickViewBlockId] = useState<string | null>(null);
   const eventModalStore = useEventModalStore();
   const [clickedElement, setClickedElement] = useState<HTMLElement | null>(null);
   const { handleEventDrop, handleEventResize } = useCalendarDragHandlers();
@@ -169,6 +170,7 @@ export function DayView({ currentDate, onDateClick }: DayViewProps) {
       const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
       if (task) {
         setQuickViewItem(task);
+        setQuickViewBlockId(item.extendedProps?.blockId ?? null);
         setIsTask(true);
       }
     } else {
@@ -362,6 +364,7 @@ export function DayView({ currentDate, onDateClick }: DayViewProps) {
           onStatusChange={handleQuickViewStatusChange}
           referenceElement={clickedElement}
           isTask={isTask}
+          blockId={isTask ? quickViewBlockId : null}
         />
       )}
     </div>

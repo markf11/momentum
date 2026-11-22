@@ -144,6 +144,8 @@ export async function POST(request: NextRequest) {
     const task = await prisma.task.create({
       data: {
         ...taskData,
+        remainingMinutes:
+          taskData.remainingMinutes ?? taskData.duration ?? null,
         // Associate the task with the current user
         userId,
         isRecurring: !!recurrenceRule,

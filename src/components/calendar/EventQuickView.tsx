@@ -12,6 +12,7 @@ import {
 } from "react-icons/io5";
 
 import { format, isFutureDate, newDate } from "@/lib/date-utils";
+import { formatMinutes, formatRemaining } from "@/lib/remaining-time";
 import {
   formatScheduleIssue,
   scheduleStatusBadge,
@@ -24,6 +25,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+
+import {
+  LogTimeControl,
+  ScheduleFixes,
+} from "@/components/tasks/ScheduleFixes";
 
 import { useTaskStore } from "@/store/task";
 
@@ -50,6 +56,8 @@ interface EventQuickViewProps {
   isTask: boolean;
   onStatusChange?: (taskId: string, status: TaskStatus) => void;
   referenceElement: HTMLElement | null;
+  /** The clicked chunk, for "Done with this chunk" (D16e). */
+  blockId?: string | null;
 }
 
 //TODO: move to utils
@@ -70,6 +78,7 @@ export function EventQuickView({
   isTask,
   onStatusChange,
   referenceElement,
+  blockId,
 }: EventQuickViewProps) {
   const getStatusColor = (status: string | undefined) => {
     switch (status?.toUpperCase()) {
@@ -100,6 +109,15 @@ export function EventQuickView({
   );
   const scheduleTask = liveTask ?? taskItem;
   const scheduleBadge = scheduleStatusBadge(scheduleTask?.scheduleStatus);
+  const chunk = useTaskStore((state) =>
+    blockId ? state.scheduledBlocks.find((b) => b.id === blockId) : undefined
+  );
+  const chunkMinutes = chunk
+    ? Math.round(
+        (newDate(chunk.end).getTime() - newDate(chunk.start).getTime()) / 60_000
+      )
+    : 0;
+  const remainingLabel = scheduleTask ? formatRemaining(scheduleTask) : null;
 
   return (
     <Popover open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -284,8 +302,35 @@ export function EventQuickView({
                 >
                   <span className="font-semibold">{scheduleBadge.label}: </span>
                   {formatScheduleIssue(scheduleTask?.scheduleIssue)}
+                  {scheduleTask && (
+                    <ScheduleFixes task={scheduleTask} className="mt-1.5" />
+                  )}
                 </div>
               )}
+              {scheduleTask &&
+                scheduleTask.status !== TaskStatus.COMPLETED &&
+                (chunk || scheduleTask.duration) && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {chunk && (
+                      <button
+                        data-testid="quickview-chunk-done"
+                        onClick={() => {
+                          void useTaskStore
+                            .getState()
+                            .completeScheduledBlock(chunk.id)
+                            .catch(() => undefined);
+                          onClose();
+                        }}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground hover:bg-muted hover:text-green-600"
+                        title={`Subtract this chunk's ${formatMinutes(chunkMinutes)} from the remaining time`}
+                      >
+                        <HiCheck className="h-3.5 w-3.5" />
+                        Done with this chunk
+                      </button>
+                    )}
+                    <LogTimeControl task={scheduleTask} />
+                  </div>
+                )}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <IoTimeOutline className="h-4 w-4 flex-shrink-0" />
@@ -392,7 +437,17 @@ export function EventQuickView({
               {taskItem.duration && (
                 <div className="flex items-center gap-2">
                   <IoTimeOutline className="h-4 w-4 flex-shrink-0" />
-                  <span>Duration: {taskItem.duration} minutes</span>
+                  <span>
+                    Duration: {taskItem.duration} minutes
+                    {remainingLabel && (
+                      <span
+                        className="ml-1 text-primary"
+                        data-testid="quickview-remaining"
+                      >
+                        ({remainingLabel})
+                      </span>
+                    )}
+                  </span>
                 </div>
               )}
 

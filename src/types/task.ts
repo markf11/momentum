@@ -42,6 +42,8 @@ export interface Task {
   dueDate?: Date | null;
   startDate?: Date | null;
   duration?: number | null;
+  /** D16e: work still to do; null = the full duration. */
+  remainingMinutes?: number | null;
   priority?: Priority | null;
   energyLevel?: EnergyLevel | null;
   preferredTime?: TimePreference | null;
@@ -67,6 +69,8 @@ export interface Task {
   hardDeadline?: boolean;
   scheduleStatus?: ScheduleStatus | null;
   scheduleIssue?: string | null;
+  /** Minutes of the remaining work the last plan fits before the due date. */
+  scheduleFitMinutes?: number | null;
   // External sync fields
   externalTaskId?: string | null;
   source?: string | null;

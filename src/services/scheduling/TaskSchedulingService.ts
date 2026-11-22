@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { remainingOf } from "@/lib/remaining-time";
 import {
   ScheduleStatus,
   SchedulerBlock,
@@ -11,6 +12,7 @@ import {
   WorkWeek,
   scheduleTasks,
 } from "@/lib/scheduler";
+import { minutesBeforeDeadline } from "@/lib/scheduler/fit";
 
 import { ProjectStatus } from "@/types/project";
 import {
@@ -137,6 +139,7 @@ export async function scheduleAllTasksForUser(
       id: task.id,
       title: task.title,
       durationMinutes: task.duration,
+      remainingMinutes: task.duration === null ? null : remainingOf(task),
       priority: schedulerPriority(task.priority),
       dueDate: task.dueDate,
       hardDeadline: task.hardDeadline,
@@ -262,6 +265,13 @@ export async function scheduleAllTasksForUser(
                 scheduleStatus: aggregatedStatus,
                 scheduleIssue:
                   results.find((result) => result.issue)?.issue ?? null,
+                // Recurring tasks have per-occurrence deadlines; skip them.
+                scheduleFitMinutes:
+                  !task.isRecurring &&
+                  (aggregatedStatus === "past_due" ||
+                    aggregatedStatus === "at_risk")
+                    ? minutesBeforeDeadline(blocks, task.dueDate)
+                    : null,
                 scheduleScore: null,
                 scheduleLocked: expiredLock ? false : task.scheduleLocked,
                 lastScheduled: now,

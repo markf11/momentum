@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/api-auth";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { remainingAfterDurationChange } from "@/lib/remaining-time";
 import { requestReplan } from "@/lib/replan-coordinator";
 
 const LOG_SOURCE = "scheduled-block-route";
@@ -61,6 +62,10 @@ export async function PATCH(
             ) / 60_000
           )
         : undefined;
+      const stored =
+        duration !== undefined
+          ? await tx.task.findUnique({ where: { id: existing.taskId } })
+          : null;
       const task = await tx.task.update({
         where: { id: existing.taskId },
         data: {
@@ -70,7 +75,14 @@ export async function PATCH(
           isAutoScheduled: true,
           scheduleStatus: "locked",
           scheduleIssue: null,
-          ...(duration !== undefined ? { duration } : {}),
+          ...(duration !== undefined
+            ? {
+                duration,
+                remainingMinutes: stored
+                  ? remainingAfterDurationChange(stored, duration)
+                  : duration,
+              }
+            : {}),
         },
       });
       return { blocks, task };

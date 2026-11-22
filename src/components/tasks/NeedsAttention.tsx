@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 
 import { Task, TaskStatus } from "@/types/task";
 
+import { ScheduleFixes } from "./ScheduleFixes";
+
 interface NeedsAttentionProps {
   tasks: Task[];
   onEdit: (task: Task) => void;
@@ -89,6 +91,7 @@ export function NeedsAttention({ tasks, onEdit }: NeedsAttentionProps) {
                 <div className="text-xs text-muted-foreground">
                   {FIX_HINT[task.scheduleStatus ?? ""]}
                 </div>
+                <ScheduleFixes task={task} className="mt-1.5" />
               </div>
               <Button
                 size="sm"
