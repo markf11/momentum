@@ -65,6 +65,7 @@ export function WeekView({ currentDate, onDateClick }: WeekViewProps) {
   const tasks = useTaskStore((state) => state.tasks);
   const [quickViewItem, setQuickViewItem] = useState<CalendarEvent | Task>();
   const [isTask, setIsTask] = useState(false);
+  const [quickViewBlockId, setQuickViewBlockId] = useState<string | null>(null);
   const eventModalStore = useEventModalStore();
   const [clickedElement, setClickedElement] = useState<HTMLElement | null>(null);
   const { handleEventDrop, handleEventResize } = useCalendarDragHandlers();
@@ -172,6 +173,7 @@ export function WeekView({ currentDate, onDateClick }: WeekViewProps) {
       const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
       if (task) {
         setQuickViewItem(task);
+        setQuickViewBlockId(item.extendedProps?.blockId ?? null);
         setIsTask(true);
       }
     } else {
@@ -344,6 +346,7 @@ export function WeekView({ currentDate, onDateClick }: WeekViewProps) {
           onStatusChange={handleQuickViewStatusChange}
           referenceElement={clickedElement}
           isTask={isTask}
+          blockId={isTask ? quickViewBlockId : null}
         />
       )}
       <EventModal

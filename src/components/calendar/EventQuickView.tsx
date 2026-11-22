@@ -11,20 +11,25 @@ import {
   IoTimeOutline,
 } from "react-icons/io5";
 
-import { format, isFutureDate, newDate } from "@/lib/date-utils";
-import { formatInZone, isEndOfDayInTimeZone } from "@/lib/task-dates";
 import {
-  formatScheduleIssue,
-  scheduleStatusBadge,
-} from "@/lib/schedule-status";
-import { isTaskOverdue } from "@/lib/task-utils";
-import { cn } from "@/lib/utils";
-
+  LogTimeControl,
+  ScheduleFixes,
+} from "@/components/tasks/ScheduleFixes";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+
+import { format, isFutureDate, newDate } from "@/lib/date-utils";
+import { formatMinutes, formatRemaining } from "@/lib/remaining-time";
+import {
+  formatScheduleIssue,
+  scheduleStatusBadge,
+} from "@/lib/schedule-status";
+import { formatInZone, isEndOfDayInTimeZone } from "@/lib/task-dates";
+import { isTaskOverdue } from "@/lib/task-utils";
+import { cn } from "@/lib/utils";
 
 import { useSettingsStore } from "@/store/settings";
 import { useTaskStore } from "@/store/task";
@@ -42,16 +47,18 @@ interface EventQuickViewProps {
   isOpen: boolean;
   onClose: () => void;
   item:
-  | (CalendarEvent & {
-    attendees?: Attendee[];
-    extendedProps?: { isTask?: boolean };
-  })
-  | (Task & { project?: { name: string; color?: string | null } | null });
+    | (CalendarEvent & {
+        attendees?: Attendee[];
+        extendedProps?: { isTask?: boolean };
+      })
+    | (Task & { project?: { name: string; color?: string | null } | null });
   onEdit: () => void;
   onDelete: () => void;
   isTask: boolean;
   onStatusChange?: (taskId: string, status: TaskStatus) => void;
   referenceElement: HTMLElement | null;
+  /** The clicked chunk, for "Done with this chunk" (D16e). */
+  blockId?: string | null;
 }
 
 //TODO: move to utils
@@ -72,6 +79,7 @@ export function EventQuickView({
   isTask,
   onStatusChange,
   referenceElement,
+  blockId,
 }: EventQuickViewProps) {
   const getStatusColor = (status: string | undefined) => {
     switch (status?.toUpperCase()) {
@@ -103,6 +111,15 @@ export function EventQuickView({
   );
   const scheduleTask = liveTask ?? taskItem;
   const scheduleBadge = scheduleStatusBadge(scheduleTask?.scheduleStatus);
+  const chunk = useTaskStore((state) =>
+    blockId ? state.scheduledBlocks.find((b) => b.id === blockId) : undefined
+  );
+  const chunkMinutes = chunk
+    ? Math.round(
+        (newDate(chunk.end).getTime() - newDate(chunk.start).getTime()) / 60_000
+      )
+    : 0;
+  const remainingLabel = scheduleTask ? formatRemaining(scheduleTask) : null;
 
   return (
     <Popover open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -110,9 +127,13 @@ export function EventQuickView({
         <div
           className="w-0 h-0 opacity-0 pointer-events-none"
           style={{
-            position: 'fixed',
-            left: referenceElement ? referenceElement.getBoundingClientRect().left : 0,
-            top: referenceElement ? referenceElement.getBoundingClientRect().top : 0,
+            position: "fixed",
+            left: referenceElement
+              ? referenceElement.getBoundingClientRect().left
+              : 0,
+            top: referenceElement
+              ? referenceElement.getBoundingClientRect().top
+              : 0,
           }}
         />
       </PopoverTrigger>
@@ -183,7 +204,10 @@ export function EventQuickView({
                   onClick={() =>
                     void useTaskStore
                       .getState()
-                      .setTaskLocked(scheduleTask.id, !scheduleTask.scheduleLocked)
+                      .setTaskLocked(
+                        scheduleTask.id,
+                        !scheduleTask.scheduleLocked
+                      )
                   }
                   className={cn(
                     "rounded-md p-1.5 hover:bg-muted",
@@ -287,8 +311,35 @@ export function EventQuickView({
                 >
                   <span className="font-semibold">{scheduleBadge.label}: </span>
                   {formatScheduleIssue(scheduleTask?.scheduleIssue, timeZone)}
+                  {scheduleTask && (
+                    <ScheduleFixes task={scheduleTask} className="mt-1.5" />
+                  )}
                 </div>
               )}
+              {scheduleTask &&
+                scheduleTask.status !== TaskStatus.COMPLETED &&
+                (chunk || scheduleTask.duration) && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {chunk && (
+                      <button
+                        data-testid="quickview-chunk-done"
+                        onClick={() => {
+                          void useTaskStore
+                            .getState()
+                            .completeScheduledBlock(chunk.id)
+                            .catch(() => undefined);
+                          onClose();
+                        }}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground hover:bg-muted hover:text-green-600"
+                        title={`Subtract this chunk's ${formatMinutes(chunkMinutes)} from the remaining time`}
+                      >
+                        <HiCheck className="h-3.5 w-3.5" />
+                        Done with this chunk
+                      </button>
+                    )}
+                    <LogTimeControl task={scheduleTask} />
+                  </div>
+                )}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <IoTimeOutline className="h-4 w-4 flex-shrink-0" />
@@ -296,9 +347,9 @@ export function EventQuickView({
                     <span
                       className={cn(
                         isOverdue &&
-                        "text-destructive dark:text-destructive font-medium",
+                          "text-destructive dark:text-destructive font-medium",
                         isFutureDate(taskItem.dueDate) &&
-                        "text-primary font-medium"
+                          "text-primary font-medium"
                       )}
                     >
                       Due{" "}
@@ -336,7 +387,7 @@ export function EventQuickView({
                   <span
                     className={cn(
                       isFutureDate(taskItem.startDate) &&
-                      "text-primary font-medium"
+                        "text-primary font-medium"
                     )}
                   >
                     Starts {format(newDate(taskItem.startDate), "PPp")}
@@ -349,10 +400,7 @@ export function EventQuickView({
                 <div className="flex items-center gap-2">
                   <IoFlagOutline className="h-4 w-4 flex-shrink-0" />
                   <span
-                    className={cn(
-                      "text-sm",
-                      priorityColors[taskItem.priority]
-                    )}
+                    className={cn("text-sm", priorityColors[taskItem.priority])}
                   >
                     {taskItem.priority.charAt(0).toUpperCase() +
                       taskItem.priority.slice(1)}{" "}
@@ -402,7 +450,17 @@ export function EventQuickView({
               {taskItem.duration && (
                 <div className="flex items-center gap-2">
                   <IoTimeOutline className="h-4 w-4 flex-shrink-0" />
-                  <span>Duration: {taskItem.duration} minutes</span>
+                  <span>
+                    Duration: {taskItem.duration} minutes
+                    {remainingLabel && (
+                      <span
+                        className="ml-1 text-primary"
+                        data-testid="quickview-remaining"
+                      >
+                        ({remainingLabel})
+                      </span>
+                    )}
+                  </span>
                 </div>
               )}
 

@@ -210,6 +210,8 @@ model Task {
   priority      String? // enum: 'high', 'medium', 'low', 'none'
   energyLevel   String? // enum: 'high', 'medium', 'low'
   preferredTime String? // enum: 'morning', 'afternoon', 'evening'
+  /// Work still to do (D16e); null means the full duration.
+  remainingMinutes Int?
 
   // Auto-scheduling
   isAutoScheduled Boolean   @default(false)
@@ -223,6 +225,8 @@ model Task {
   hardDeadline    Boolean   @default(false)
   scheduleStatus  String?
   scheduleIssue   String?
+  /// Minutes of the remaining work the last plan fits before the due date.
+  scheduleFitMinutes Int?
   scheduledBlocks ScheduledBlock[]
 
   // Calendar block push

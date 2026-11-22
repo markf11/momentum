@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 
 import { format, isSameDay, newDate } from "@/lib/date-utils";
+import { formatRemaining } from "@/lib/remaining-time";
 import { scheduleStatusBadge } from "@/lib/schedule-status";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ import { useTaskStore } from "@/store/task";
 import { Task, TaskStatus } from "@/types/task";
 
 import { useDraggableTask } from "../../dnd/useDragAndDrop";
+import { LogTimeControl } from "../ScheduleFixes";
 import {
   formatEnumValue,
   isUpcomingTask,
@@ -229,6 +231,15 @@ export function TaskRow({
           value={task.duration}
           onSave={onInlineEdit}
         />
+        {formatRemaining(task) && (
+          <div
+            className="text-xs text-primary"
+            data-testid="remaining-time"
+            title="D16e: remaining work after logged time and finished chunks"
+          >
+            {formatRemaining(task)}
+          </div>
+        )}
       </td>
       <td className="whitespace-nowrap px-3 py-2">
         <EditableCell
@@ -322,6 +333,9 @@ export function TaskRow({
       </td>
       <td className="whitespace-nowrap px-3 py-2 text-right text-sm font-medium">
         <div className="flex items-center gap-1">
+          {task.status !== TaskStatus.COMPLETED && (
+            <LogTimeControl task={task} />
+          )}
           <Button
             size="sm"
             variant="ghost"

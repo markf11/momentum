@@ -7,6 +7,7 @@ import { authenticateRequest } from "@/lib/auth/api-auth";
 import { newDate } from "@/lib/date-utils";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { remainingOf, resolveRemainingUpdate } from "@/lib/remaining-time";
 import { requestReplan } from "@/lib/replan-coordinator";
 import {
   deleteTaskBlockEvent,
@@ -116,6 +117,26 @@ export async function PUT(
       throw error;
     }
 
+    // D16e remaining time: a duration edit keeps the worked minutes, and a
+    // task with nothing left is done. Reopening a finished task restores it.
+    const reopening =
+      task.status === TaskStatus.COMPLETED &&
+      updates.status !== undefined &&
+      updates.status !== TaskStatus.COMPLETED;
+    const remaining = resolveRemainingUpdate(task, updates);
+    if (reopening && (remaining ?? remainingOf(task)) === 0) {
+      updates.remainingMinutes = updates.duration ?? task.duration;
+    } else if (remaining !== undefined) {
+      updates.remainingMinutes = remaining;
+      if (
+        remaining === 0 &&
+        (updates.duration ?? task.duration ?? 0) > 0 &&
+        task.status !== TaskStatus.COMPLETED
+      ) {
+        updates.status = TaskStatus.COMPLETED;
+      }
+    }
+
     // Set completedAt when task is marked as completed
     if (
       updates.status === TaskStatus.COMPLETED &&
@@ -209,6 +230,7 @@ export async function PUT(
           updates.dueDate = nextOccurrence;
           updates.startDate = nextStartDate; // Update the start date if calculated
           updates.status = TaskStatus.TODO;
+          updates.remainingMinutes = updates.duration ?? task.duration;
           updates.lastCompletedDate = newDate();
         }
       } catch (error) {

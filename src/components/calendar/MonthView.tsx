@@ -65,6 +65,7 @@ export function MonthView({ currentDate, onDateClick }: MonthViewProps) {
   const tasks = useTaskStore((state) => state.tasks);
   const [quickViewItem, setQuickViewItem] = useState<CalendarEvent | Task>();
   const [isTask, setIsTask] = useState(false);
+  const [quickViewBlockId, setQuickViewBlockId] = useState<string | null>(null);
   const eventModalStore = useEventModalStore();
   const [clickedElement, setClickedElement] = useState<HTMLElement | null>(null);
   const { handleEventDrop } = useCalendarDragHandlers();
@@ -166,6 +167,7 @@ export function MonthView({ currentDate, onDateClick }: MonthViewProps) {
       const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
       if (task) {
         setQuickViewItem(task);
+        setQuickViewBlockId(item.extendedProps?.blockId ?? null);
         setIsTask(true);
       }
     } else {
@@ -325,6 +327,7 @@ export function MonthView({ currentDate, onDateClick }: MonthViewProps) {
           onStatusChange={handleQuickViewStatusChange}
           referenceElement={clickedElement}
           isTask={isTask}
+          blockId={isTask ? quickViewBlockId : null}
         />
       )}
     </div>
