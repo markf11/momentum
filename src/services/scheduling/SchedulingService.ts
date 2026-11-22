@@ -112,6 +112,18 @@ export class SchedulingService {
         updatedAt: newDate(),
         pushTasksToCalendar: false,
         pushTasksFeedId: null,
+        workHours: JSON.stringify([
+          null,
+          { start: "09:00", end: "17:00" },
+          { start: "09:00", end: "17:00" },
+          { start: "09:00", end: "17:00" },
+          { start: "09:00", end: "17:00" },
+          { start: "09:00", end: "17:00" },
+          null,
+        ]),
+        defaultMinChunkMinutes: 30,
+        breakAfterMinutes: null,
+        breakDurationMinutes: 15,
       };
     }
 

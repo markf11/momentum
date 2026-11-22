@@ -4,6 +4,7 @@ import { authenticateRequest } from "@/lib/auth/api-auth";
 import { newDate } from "@/lib/date-utils";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { requestReplan } from "@/lib/replan-coordinator";
 
 const LOG_SOURCE = "events-route";
 
@@ -118,6 +119,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    requestReplan(userId);
     return NextResponse.json(event);
   } catch (error) {
     logger.error(
@@ -192,6 +194,7 @@ export async function PATCH(request: NextRequest) {
       },
     });
 
+    requestReplan(userId);
     return NextResponse.json(event);
   } catch (error) {
     logger.error(
@@ -246,6 +249,7 @@ export async function DELETE(request: NextRequest) {
       where: { id },
     });
 
+    requestReplan(userId);
     return NextResponse.json({ success: true });
   } catch (error) {
     logger.error(

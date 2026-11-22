@@ -18,6 +18,7 @@ interface CalendarEventContentProps {
 }
 
 const priorityColors = {
+  [Priority.ASAP]: "border-purple-600",
   [Priority.HIGH]: "border-red-500",
   [Priority.MEDIUM]: "border-orange-500",
   [Priority.LOW]: "border-blue-500",

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/api-auth";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { requestReplan } from "@/lib/replan-coordinator";
 
 const LOG_SOURCE = "UserSettingsAPI";
 
@@ -62,6 +63,7 @@ export async function PATCH(request: NextRequest) {
       },
     });
 
+    if (updates.timeZone) requestReplan(userId);
     return NextResponse.json(settings);
   } catch (error) {
     logger.error(

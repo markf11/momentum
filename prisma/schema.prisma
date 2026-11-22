@@ -89,6 +89,7 @@ model User {
   integrationSettings  IntegrationSettings?
   dataSettings         DataSettings?
   tasks                Task[]
+  scheduledBlocks      ScheduledBlock[]
   projects             Project[]
   connectedAccounts    ConnectedAccount[]
   tags                 Tag[]
@@ -218,6 +219,11 @@ model Task {
   scheduleScore   Float?
   lastScheduled   DateTime?
   postponedUntil  DateTime? // New field for postponing tasks
+  minChunkMinutes Int?
+  hardDeadline    Boolean   @default(false)
+  scheduleStatus  String?
+  scheduleIssue   String?
+  scheduledBlocks ScheduledBlock[]
 
   // Calendar block push
   blockEventId String? // Google Calendar event ID of the pushed block
@@ -280,6 +286,26 @@ model Task {
   @@index([blockFeedId])
 }
 
+model ScheduledBlock {
+  id            String    @id @default(cuid())
+  taskId        String
+  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  start         DateTime
+  end           DateTime
+  chunkIndex    Int
+  instanceStart DateTime?
+  locked        Boolean   @default(false)
+  status        String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([taskId])
+  @@index([userId, start, end])
+  @@index([userId, locked])
+}
+
 model Tag {
   id    String  @id @default(cuid())
   name  String
@@ -301,9 +327,15 @@ model AutoScheduleSettings {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Work Hours
-  workDays      String @default("[]") // JSON string of numbers 0-6
+  workDays      String @default("[]") // Legacy whole-hour schedule
   workHourStart Int // 0-23
   workHourEnd   Int // 0-23
+  workHours     String @default("[null,{\"start\":\"09:00\",\"end\":\"17:00\"},{\"start\":\"09:00\",\"end\":\"17:00\"},{\"start\":\"09:00\",\"end\":\"17:00\"},{\"start\":\"09:00\",\"end\":\"17:00\"},{\"start\":\"09:00\",\"end\":\"17:00\"},null]")
+
+  // Momentum scheduling rules
+  defaultMinChunkMinutes Int @default(30)
+  breakAfterMinutes      Int?
+  breakDurationMinutes   Int @default(15)
 
   // Preferences
   selectedCalendars String @default("[]") // JSON string of calendar IDs

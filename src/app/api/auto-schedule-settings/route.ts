@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/api-auth";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { requestReplan } from "@/lib/replan-coordinator";
 import { removeAllTaskBlocks } from "@/lib/task-block-push";
 
 const LOG_SOURCE = "AutoScheduleSettingsAPI";
@@ -92,6 +93,7 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
+    requestReplan(userId);
     return NextResponse.json(settings);
   } catch (error) {
     logger.error(

@@ -1,5 +1,16 @@
+import { Prisma } from "@prisma/client";
+
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import {
+  ScheduleStatus,
+  SchedulerBlock,
+  SchedulerPriority,
+  SchedulerTask,
+  TaskScheduleResult,
+  WorkWeek,
+  scheduleTasks,
+} from "@/lib/scheduler";
 
 import { ProjectStatus } from "@/types/project";
 import {
@@ -10,212 +21,274 @@ import {
   TimePreference,
 } from "@/types/task";
 
-import { SchedulingService } from "./SchedulingService";
-
 const LOG_SOURCE = "TaskSchedulingService";
-
-// Define a type for the database result
-type DbTaskWithRelations = {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  dueDate: Date | null;
-  duration: number | null;
-  priority: string | null;
-  energyLevel: string | null;
-  preferredTime: string | null;
-  projectId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  recurrenceRule: string | null;
-  lastCompletedDate: Date | null;
-  completedAt: Date | null;
-  isRecurring: boolean;
-  isAutoScheduled: boolean;
-  scheduledStart: Date | null;
-  scheduledEnd: Date | null;
-  scheduleScore: number | null;
-  lastScheduled: Date | null;
-  scheduleLocked: boolean;
-  postponedUntil: Date | null;
-  userId: string;
-  tags: {
-    id: string;
-    name: string;
-    color: string | null;
-    userId: string | null;
-  }[];
-  project: {
-    id: string;
-    name: string;
-    description: string | null;
-    color: string | null;
-    status: string;
-    createdAt: Date;
-    updatedAt: Date;
-    userId: string | null;
-  } | null;
+const STATUS_SEVERITY: Record<ScheduleStatus, number> = {
+  unscheduled: 0,
+  on_time: 1,
+  locked: 2,
+  at_risk: 3,
+  past_due: 4,
+  cant_fit: 5,
 };
 
-/**
- * Convert database task to TaskWithRelations
- */
-function convertDbTaskToTaskWithRelations(
-  dbTask: DbTaskWithRelations
-): TaskWithRelations {
+type DbTask = Prisma.TaskGetPayload<{
+  include: { tags: true; project: true };
+}>;
+type DbSettings = Prisma.AutoScheduleSettingsGetPayload<object>;
+
+function convertDbTask(task: DbTask): TaskWithRelations {
   return {
-    ...dbTask,
-    status: dbTask.status as TaskStatus,
-    priority: dbTask.priority as Priority | null,
-    energyLevel: dbTask.energyLevel as EnergyLevel | null,
-    preferredTime: dbTask.preferredTime as TimePreference | null,
-    tags: dbTask.tags.map((tag) => ({
+    ...task,
+    status: task.status as TaskStatus,
+    priority: task.priority as Priority | null,
+    scheduleStatus: task.scheduleStatus as TaskWithRelations["scheduleStatus"],
+    energyLevel: task.energyLevel as EnergyLevel | null,
+    preferredTime: task.preferredTime as TimePreference | null,
+    tags: task.tags.map((tag) => ({
       id: tag.id,
       name: tag.name,
       color: tag.color || undefined,
     })),
-    project: dbTask.project
-      ? {
-          ...dbTask.project,
-          status: dbTask.project.status as ProjectStatus,
-        }
+    project: task.project
+      ? { ...task.project, status: task.project.status as ProjectStatus }
       : null,
   };
 }
 
-/**
- * Schedule all tasks for a user
- * @param userId The user ID
- * @returns The updated tasks
- */
-export async function scheduleAllTasksForUser(
-  userId: string
-): Promise<TaskWithRelations[]>;
+function parseWorkWeek(settings: DbSettings): WorkWeek {
+  try {
+    const parsed = JSON.parse(settings.workHours) as WorkWeek;
+    if (parsed.length === 7) return parsed;
+  } catch {
+    // Fall through to the legacy whole-hour settings.
+  }
 
-/**
- * Implementation of scheduleAllTasksForUser
- */
+  let workDays: number[] = [];
+  try {
+    workDays = JSON.parse(settings.workDays) as number[];
+  } catch {
+    workDays = [];
+  }
+  const start = `${settings.workHourStart.toString().padStart(2, "0")}:00`;
+  const end = `${settings.workHourEnd.toString().padStart(2, "0")}:00`;
+  return Array.from({ length: 7 }, (_, day) =>
+    workDays.includes(day) ? { start, end } : null
+  );
+}
+
+function schedulerPriority(value: string | null): SchedulerPriority {
+  return value === "asap" ||
+    value === "high" ||
+    value === "medium" ||
+    value === "low"
+    ? value
+    : "none";
+}
+
+function aggregateStatus(results: TaskScheduleResult[]): ScheduleStatus {
+  return results.reduce<ScheduleStatus>(
+    (status, result) =>
+      STATUS_SEVERITY[result.status] > STATUS_SEVERITY[status]
+        ? result.status
+        : status,
+    "unscheduled"
+  );
+}
+
+/** Load once, plan once, and persist the complete plan in one transaction. */
 export async function scheduleAllTasksForUser(
   userId: string
 ): Promise<TaskWithRelations[]> {
   try {
-    logger.info("Starting task scheduling for user", { userId }, LOG_SOURCE);
-
-    // If settings are not provided, fetch them from the database
-    const userSettings = await prisma.autoScheduleSettings.findUnique({
+    const now = new Date();
+    const settings = await prisma.autoScheduleSettings.upsert({
       where: { userId },
+      update: {},
+      create: {
+        userId,
+        workDays: JSON.stringify([1, 2, 3, 4, 5]),
+        workHourStart: 9,
+        workHourEnd: 17,
+      },
     });
 
-    if (!userSettings) {
-      throw new Error("Auto-schedule settings not found for user");
+    const [userSettings, tasks, existingBlocks, busyEvents] = await Promise.all(
+      [
+        prisma.userSettings.findUnique({ where: { userId } }),
+        prisma.task.findMany({
+          where: { userId, status: { not: TaskStatus.COMPLETED } },
+          include: { tags: true, project: true },
+        }),
+        prisma.scheduledBlock.findMany({ where: { userId } }),
+        prisma.calendarEvent.findMany({
+          where: { feed: { userId, type: "LOCAL" } },
+        }),
+      ]
+    );
+
+    const blocksByTask = new Map<string, typeof existingBlocks>();
+    for (const block of existingBlocks) {
+      const blocks = blocksByTask.get(block.taskId) ?? [];
+      blocks.push(block);
+      blocksByTask.set(block.taskId, blocks);
     }
 
-    // Get all tasks marked for auto-scheduling that are not locked
-    const tasksToSchedule = await prisma.task.findMany({
-      where: {
-        isAutoScheduled: true,
-        scheduleLocked: false,
-        status: {
-          not: {
-            in: [TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS],
-          },
-        },
-        userId,
+    const engineTasks: SchedulerTask[] = tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      durationMinutes: task.duration,
+      priority: schedulerPriority(task.priority),
+      dueDate: task.dueDate,
+      hardDeadline: task.hardDeadline,
+      startDate: task.startDate,
+      minChunkMinutes: task.minChunkMinutes,
+      autoSchedule: task.isAutoScheduled,
+      locked: task.scheduleLocked,
+      scheduledStart: task.scheduledStart,
+      scheduledEnd: task.scheduledEnd,
+      recurrenceRule: task.isRecurring ? task.recurrenceRule : null,
+      lockedBlocks: (blocksByTask.get(task.id) ?? []).map((block) => ({
+        taskId: block.taskId,
+        start: block.start,
+        end: block.end,
+        chunkIndex: block.chunkIndex,
+        instanceStart: block.instanceStart,
+        locked: block.locked,
+        status: block.status as ScheduleStatus,
+      })),
+    }));
+
+    const output = scheduleTasks({
+      tasks: engineTasks,
+      busyEvents: busyEvents.map((event) => ({
+        id: event.id,
+        start: event.start,
+        end: event.end,
+        recurrenceRule: event.isMaster ? event.recurrenceRule : null,
+      })),
+      settings: {
+        workWeek: parseWorkWeek(settings),
+        defaultMinChunkMinutes: settings.defaultMinChunkMinutes,
+        breakRule: settings.breakAfterMinutes
+          ? {
+              afterMinutes: settings.breakAfterMinutes,
+              durationMinutes: settings.breakDurationMinutes,
+            }
+          : null,
       },
-      include: {
-        project: true,
-        tags: true,
-      },
+      now,
+      timeZone: userSettings?.timeZone || "UTC",
+      horizonDays: 31,
     });
 
-    // Get locked tasks (we'll keep their schedules)
-    const lockedTasks = await prisma.task.findMany({
-      where: {
-        isAutoScheduled: true,
-        scheduleLocked: true,
-        status: {
-          not: {
-            in: [TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS],
-          },
-        },
-        userId,
-      },
-      include: {
-        project: true,
-        tags: true,
-      },
-    });
+    const resultsByTask = new Map<string, TaskScheduleResult[]>();
+    const blocksByTaskResult = new Map<string, SchedulerBlock[]>();
+    for (const result of output.tasks) {
+      const results = resultsByTask.get(result.taskId) ?? [];
+      results.push(result);
+      resultsByTask.set(result.taskId, results);
+    }
+    for (const block of output.blocks) {
+      const blocks = blocksByTaskResult.get(block.taskId) ?? [];
+      blocks.push(block);
+      blocksByTaskResult.set(block.taskId, blocks);
+    }
 
+    // Existing future locks are already in the database and must not be
+    // deleted or inserted twice. Legacy/synthetic locks are inserted below.
+    const preservedLockedTaskIds = new Set(
+      tasks
+        .filter(
+          (task) =>
+            task.scheduleLocked &&
+            (blocksByTask.get(task.id) ?? []).some(
+              (block) => block.locked && block.end.getTime() > now.getTime()
+            )
+        )
+        .map((task) => task.id)
+    );
+    const preservedIds = [...preservedLockedTaskIds];
+    const blocksToInsert = output.blocks.filter(
+      (block) => !block.locked || !preservedLockedTaskIds.has(block.taskId)
+    );
+
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.scheduledBlock.deleteMany({
+          where: {
+            userId,
+            ...(preservedIds.length
+              ? {
+                  OR: [{ locked: false }, { taskId: { notIn: preservedIds } }],
+                }
+              : {}),
+          },
+        });
+        if (blocksToInsert.length) {
+          await tx.scheduledBlock.createMany({
+            data: blocksToInsert.map((block) => ({
+              taskId: block.taskId,
+              userId,
+              start: block.start,
+              end: block.end,
+              chunkIndex: block.chunkIndex,
+              instanceStart: block.instanceStart,
+              locked: block.locked,
+              status: block.status,
+            })),
+          });
+        }
+
+        await Promise.all(
+          tasks.map((task) => {
+            const results = resultsByTask.get(task.id) ?? [];
+            const blocks = (blocksByTaskResult.get(task.id) ?? []).sort(
+              (a, b) => a.start.getTime() - b.start.getTime()
+            );
+            const aggregatedStatus = results.length
+              ? aggregateStatus(results)
+              : null;
+            const expiredLock =
+              task.scheduleLocked &&
+              !output.tasks.some(
+                (result) =>
+                  result.taskId === task.id && result.status === "locked"
+              );
+            return tx.task.update({
+              where: { id: task.id },
+              data: {
+                scheduledStart: blocks[0]?.start ?? null,
+                scheduledEnd: blocks[blocks.length - 1]?.end ?? null,
+                scheduleStatus: aggregatedStatus,
+                scheduleIssue:
+                  results.find((result) => result.issue)?.issue ?? null,
+                scheduleScore: null,
+                scheduleLocked: expiredLock ? false : task.scheduleLocked,
+                lastScheduled: now,
+                blockDirty: task.blockEventId ? true : task.blockDirty,
+              },
+            });
+          })
+        );
+      },
+      { timeout: 15_000 }
+    );
+
+    const updatedTasks = await prisma.task.findMany({
+      where: { userId },
+      include: { tags: true, project: true },
+    });
     logger.info(
-      "Found tasks to schedule",
+      "Momentum scheduling completed",
       {
-        tasksToScheduleCount: tasksToSchedule.length,
-        lockedTasksCount: lockedTasks.length,
+        userId,
+        tasks: tasks.length,
+        blocks: output.blocks.length,
+        issues: output.issues.length,
       },
       LOG_SOURCE
     );
-
-    // Initialize scheduling service with settings
-    const schedulingService = new SchedulingService(userSettings);
-
-    // Clear existing schedules for non-locked tasks
-    await prisma.task.updateMany({
-      where: {
-        id: {
-          in: tasksToSchedule.map((task) => task.id),
-        },
-        userId,
-      },
-      data: {
-        scheduledStart: null,
-        scheduledEnd: null,
-        scheduleScore: null,
-      },
-    });
-
-    // Schedule all tasks
-    const updatedTasks = await schedulingService.scheduleMultipleTasks(
-      [...tasksToSchedule, ...lockedTasks],
-      userId
-    );
-
-    // Update the lastScheduled timestamp for all tasks
-    await prisma.task.updateMany({
-      where: {
-        id: {
-          in: updatedTasks.map((task) => task.id),
-        },
-      },
-      data: {
-        lastScheduled: new Date(),
-      },
-    });
-
-    // Fetch the tasks again with their relations to return
-    const dbTasks = (await prisma.task.findMany({
-      where: {
-        id: {
-          in: updatedTasks.map((task) => task.id),
-        },
-        userId,
-      },
-      include: {
-        tags: true,
-        project: true,
-      },
-    })) as DbTaskWithRelations[];
-
-    // Convert database tasks to TaskWithRelations
-    const tasksWithRelations = dbTasks.map(convertDbTaskToTaskWithRelations);
-
-    logger.info(
-      "Task scheduling completed successfully",
-      { userId, tasksScheduled: updatedTasks.length },
-      LOG_SOURCE
-    );
-
-    return tasksWithRelations;
+    return updatedTasks.map(convertDbTask);
   } catch (error) {
     logger.error(
       "Error scheduling tasks",

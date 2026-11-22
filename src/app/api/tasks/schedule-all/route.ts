@@ -1,36 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { scheduleAllTasksForUser } from "@/services/scheduling/TaskSchedulingService";
-
 import { authenticateRequest } from "@/lib/auth/api-auth";
 import { logger } from "@/lib/logger";
-import { repushDirtyBlocks } from "@/lib/task-block-push";
+import { prisma } from "@/lib/prisma";
+import { replanNow } from "@/lib/replan-coordinator";
 
 const LOG_SOURCE = "task-schedule-route";
 
 export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateRequest(request, LOG_SOURCE);
-    if ("response" in auth) {
-      return auth.response;
-    }
+    if ("response" in auth) return auth.response;
 
-    const userId = auth.userId;
-
-    // Use the common function to schedule all tasks
-    // If settings are provided, use them, otherwise use the overloaded function
-    const tasksWithRelations = await scheduleAllTasksForUser(userId);
-
-    // Repush dirty blocks and newly scheduled tasks to calendar
-    await repushDirtyBlocks(userId);
-
-    return NextResponse.json(tasksWithRelations);
+    await replanNow(auth.userId);
+    const tasks = await prisma.task.findMany({
+      where: { userId: auth.userId },
+      include: { tags: true, project: true },
+    });
+    return NextResponse.json(tasks);
   } catch (error) {
     logger.error(
       "Error scheduling tasks:",
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
+      { error: error instanceof Error ? error.message : String(error) },
       LOG_SOURCE
     );
     return NextResponse.json(

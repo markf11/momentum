@@ -6,6 +6,7 @@ import { authenticateRequest } from "@/lib/auth/api-auth";
 import { newDate } from "@/lib/date-utils";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { requestReplan } from "@/lib/replan-coordinator";
 import { schedulePushTaskBlock } from "@/lib/task-block-push";
 import {
   ChangeType,
@@ -186,6 +187,7 @@ export async function POST(request: NextRequest) {
       schedulePushTaskBlock(userId, task.id);
     }
 
+    requestReplan(userId);
     return NextResponse.json(task);
   } catch (error) {
     logger.error(

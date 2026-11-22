@@ -7,6 +7,7 @@ import { authenticateRequest } from "@/lib/auth/api-auth";
 import { newDate } from "@/lib/date-utils";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { requestReplan } from "@/lib/replan-coordinator";
 import {
   deleteTaskBlockEvent,
   schedulePushTaskBlock,
@@ -286,8 +287,55 @@ export async function PUT(
       );
     }
 
+    // Full-object saves (inline edits) echo the current scheduled times back,
+    // so only a real change of times counts as a manual move.
+    const movedTo =
+      updates.scheduledStart && updates.scheduledEnd
+        ? {
+            start: new Date(updates.scheduledStart),
+            end: new Date(updates.scheduledEnd),
+          }
+        : null;
+    const timesChanged =
+      movedTo !== null &&
+      (movedTo.start.getTime() !== task.scheduledStart?.getTime() ||
+        movedTo.end.getTime() !== task.scheduledEnd?.getTime());
+    if (
+      movedTo &&
+      timesChanged &&
+      updatedTask.scheduleLocked &&
+      movedTo.end.getTime() > movedTo.start.getTime()
+    ) {
+      // A manual move pins the whole task to the new slot (D7): replace any
+      // engine-placed chunks with one locked block, so the next re-plan
+      // keeps it here instead of restoring the old chunk times.
+      await prisma.$transaction([
+        prisma.scheduledBlock.deleteMany({ where: { taskId: id, userId } }),
+        prisma.scheduledBlock.create({
+          data: {
+            taskId: id,
+            userId,
+            start: movedTo.start,
+            end: movedTo.end,
+            chunkIndex: 0,
+            locked: true,
+            status: "locked",
+          },
+        }),
+      ]);
+    } else if (updates.scheduleLocked !== undefined) {
+      await prisma.scheduledBlock.updateMany({
+        where: { taskId: id, userId },
+        data: {
+          locked: updates.scheduleLocked,
+          ...(updates.scheduleLocked ? { status: "locked" } : {}),
+        },
+      });
+    }
+
     // Schedule calendar block push for any changes to scheduled times or status
     schedulePushTaskBlock(userId, id);
+    requestReplan(userId);
 
     return NextResponse.json(updatedTask);
   } catch (error) {
@@ -388,6 +436,7 @@ export async function DELETE(
       },
     });
 
+    requestReplan(userId);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     logger.error(

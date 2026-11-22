@@ -15,6 +15,7 @@ export enum EnergyLevel {
 }
 
 export enum Priority {
+  ASAP = "asap",
   HIGH = "high",
   MEDIUM = "medium",
   LOW = "low",
@@ -61,11 +62,36 @@ export interface Task {
   lastScheduled?: Date | null;
   scheduleLocked: boolean;
   postponedUntil?: Date | null;
+  // Momentum scheduling fields
+  minChunkMinutes?: number | null;
+  hardDeadline?: boolean;
+  scheduleStatus?: ScheduleStatus | null;
+  scheduleIssue?: string | null;
   // External sync fields
   externalTaskId?: string | null;
   source?: string | null;
   externalListId?: string | null;
   lastSyncedAt?: Date | null;
+}
+
+export type ScheduleStatus =
+  | "on_time"
+  | "at_risk"
+  | "past_due"
+  | "cant_fit"
+  | "locked"
+  | "unscheduled";
+
+/** One persisted chunk of a task, as returned by /api/scheduled-blocks. */
+export interface ScheduledBlock {
+  id: string;
+  taskId: string;
+  start: string | Date;
+  end: string | Date;
+  chunkIndex: number;
+  instanceStart?: string | Date | null;
+  locked: boolean;
+  status: ScheduleStatus;
 }
 
 export interface NewTask
