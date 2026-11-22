@@ -5,6 +5,7 @@ import { UpdateTask } from "@/types/task";
 interface TaskDragProps {
   isTask?: boolean;
   taskId?: string;
+  blockId?: string;
   isAutoScheduled?: boolean;
 }
 
@@ -23,6 +24,14 @@ export interface DragChange {
 
 export type DropUpdate =
   | { kind: "task"; taskId: string; updates: UpdateTask }
+  | {
+      kind: "block";
+      taskId: string;
+      blockId: string;
+      start: Date;
+      end: Date;
+      resize: boolean;
+    }
   | {
       kind: "event";
       eventId: string;
@@ -83,6 +92,18 @@ export function computeDropUpdate(
       return {
         kind: "blocked",
         reason: "Only auto-scheduled tasks can be moved on the calendar",
+      };
+    }
+    if (props.blockId) {
+      // A persisted engine chunk: moving it locks the task (all its chunks)
+      // and the server re-plans everything else around it.
+      return {
+        kind: "block",
+        taskId: props.taskId,
+        blockId: props.blockId,
+        start: newStart,
+        end: newEnd,
+        resize: isResize,
       };
     }
     const updates: UpdateTask = {

@@ -808,7 +808,7 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
 
   // Convert tasks to calendar events
   getTasksAsEvents: (start: Date, end: Date) => {
-    const tasks = useTaskStore.getState().tasks;
+    const { tasks, scheduledBlocks } = useTaskStore.getState();
     // const userTimeZone = useSettingsStore.getState().user.timeZone;
 
     // Create date boundaries in user's timezone
@@ -817,8 +817,86 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
     const endDay = newDate(end);
     endDay.setHours(23, 59, 59, 999);
 
+    // Momentum: an auto-scheduled task is drawn as its persisted engine chunks
+    // (one calendar block per chunk). Tasks without chunks keep the legacy
+    // single scheduledStart/End block or the all-day due-date chip below.
+    const blocksByTask = new Map<string, typeof scheduledBlocks>();
+    for (const block of scheduledBlocks) {
+      const list = blocksByTask.get(block.taskId) ?? [];
+      list.push(block);
+      blocksByTask.set(block.taskId, list);
+    }
+    const chunkEvents: CalendarEvent[] = [];
+    const chunkedTaskIds = new Set<string>();
+    for (const task of tasks) {
+      const blocks = blocksByTask.get(task.id);
+      if (
+        !blocks?.length ||
+        !task.isAutoScheduled ||
+        task.status === TaskStatus.COMPLETED
+      ) {
+        continue;
+      }
+      chunkedTaskIds.add(task.id);
+      // Chunks are numbered per occurrence, so a recurring task's instances
+      // each read "(1/2)", "(2/2)".
+      const byInstance = new Map<string, typeof blocks>();
+      for (const block of blocks) {
+        const key = block.instanceStart ? String(block.instanceStart) : "";
+        const list = byInstance.get(key) ?? [];
+        list.push(block);
+        byInstance.set(key, list);
+      }
+      for (const group of byInstance.values()) {
+        const sorted = [...group].sort(
+          (a, b) => newDate(a.start).getTime() - newDate(b.start).getTime()
+        );
+        sorted.forEach((block, index) => {
+          const blockStart = newDate(block.start);
+          if (blockStart < startDay || blockStart > endDay) return;
+          chunkEvents.push({
+            id: `${task.id}::${block.id}`,
+            feedId: "tasks",
+            title:
+              sorted.length > 1
+                ? `${task.title} (${index + 1}/${sorted.length})`
+                : task.title,
+            description: task.description || undefined,
+            start: blockStart,
+            end: newDate(block.end),
+            isRecurring: task.isRecurring,
+            isMaster: false,
+            allDay: false,
+            color: task.tags[0]?.color || DEFAULT_TASK_COLOR,
+            extendedProps: {
+              isTask: true,
+              taskId: task.id,
+              blockId: block.id,
+              status: task.status,
+              priority: task.priority?.toString() || undefined,
+              energyLevel: task.energyLevel?.toString() || undefined,
+              preferredTime: task.preferredTime?.toString(),
+              tags: task.tags,
+              isAutoScheduled: true,
+              scheduleLocked: task.scheduleLocked || block.locked,
+              scheduleStatus: task.scheduleStatus ?? block.status,
+              scheduleIssue: task.scheduleIssue ?? null,
+              dueDate: task.dueDate
+                ? newDate(task.dueDate).toISOString()
+                : null,
+              startDate: task.startDate
+                ? newDate(task.startDate).toISOString()
+                : null,
+            },
+          });
+        });
+      }
+    }
+
     const events = tasks
       .filter((task) => {
+        if (chunkedTaskIds.has(task.id)) return false;
+
         // Skip completed tasks
         if (task.status === TaskStatus.COMPLETED) {
           return false;
@@ -864,6 +942,9 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
               tags: task.tags,
               isAutoScheduled: true,
               scheduleScore: task.scheduleScore,
+              scheduleLocked: task.scheduleLocked,
+              scheduleStatus: task.scheduleStatus ?? null,
+              scheduleIssue: task.scheduleIssue ?? null,
               dueDate: task.dueDate
                 ? newDate(task.dueDate).toISOString()
                 : null,
@@ -904,6 +985,8 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
               preferredTime: task.preferredTime?.toString(),
               tags: task.tags,
               isAutoScheduled: false,
+              scheduleStatus: task.scheduleStatus ?? null,
+              scheduleIssue: task.scheduleIssue ?? null,
               dueDate: task.dueDate
                 ? newDate(task.dueDate).toISOString()
                 : null,
@@ -915,7 +998,7 @@ export const useCalendarStore = create<CalendarStore>()((set, get) => ({
         }
       });
 
-    return events;
+    return [...chunkEvents, ...events];
   },
 
   // Get both events and tasks for the calendar

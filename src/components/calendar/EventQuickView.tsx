@@ -5,12 +5,17 @@ import {
   IoFolderOutline,
   IoLocationOutline,
   IoLockClosedOutline,
+  IoLockOpenOutline,
   IoPeopleOutline,
   IoRepeat,
   IoTimeOutline,
 } from "react-icons/io5";
 
 import { format, isFutureDate, newDate } from "@/lib/date-utils";
+import {
+  formatScheduleIssue,
+  scheduleStatusBadge,
+} from "@/lib/schedule-status";
 import { isTaskOverdue } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +24,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+
+import { useTaskStore } from "@/store/task";
 
 import { AttendeeStatus, CalendarEvent } from "@/types/calendar";
 import { Priority, Task, TaskStatus } from "@/types/task";
@@ -86,6 +93,13 @@ export function EventQuickView({
     : null;
 
   const isOverdue = taskItem && isTaskOverdue(taskItem);
+  // The quick view holds a snapshot; lock state and schedule status come
+  // from the live store so they update after a toggle or re-plan.
+  const liveTask = useTaskStore((state) =>
+    taskItem ? state.tasks.find((t) => t.id === taskItem.id) : undefined
+  );
+  const scheduleTask = liveTask ?? taskItem;
+  const scheduleBadge = scheduleStatusBadge(scheduleTask?.scheduleStatus);
 
   return (
     <Popover open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -160,6 +174,33 @@ export function EventQuickView({
                   <HiCheck className="h-4 w-4" />
                 </button>
               )}
+              {isTask && scheduleTask?.isAutoScheduled && (
+                <button
+                  data-testid="quickview-lock-toggle"
+                  onClick={() =>
+                    void useTaskStore
+                      .getState()
+                      .setTaskLocked(scheduleTask.id, !scheduleTask.scheduleLocked)
+                  }
+                  className={cn(
+                    "rounded-md p-1.5 hover:bg-muted",
+                    scheduleTask.scheduleLocked
+                      ? "text-warning"
+                      : "text-muted-foreground hover:text-primary"
+                  )}
+                  title={
+                    scheduleTask.scheduleLocked
+                      ? "Unlock: return to auto-scheduling"
+                      : "Lock at the current time"
+                  }
+                >
+                  {scheduleTask.scheduleLocked ? (
+                    <IoLockClosedOutline className="h-4 w-4" />
+                  ) : (
+                    <IoLockOpenOutline className="h-4 w-4" />
+                  )}
+                </button>
+              )}
               <button
                 onClick={onEdit}
                 className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary"
@@ -232,6 +273,19 @@ export function EventQuickView({
 
           {isTask && taskItem && (
             <div className="space-y-2 text-sm text-muted-foreground">
+              {scheduleBadge && (
+                <div
+                  className={cn(
+                    "rounded-md px-2 py-1.5 text-xs",
+                    scheduleBadge.tone === "red"
+                      ? "bg-red-500/10 text-red-700 dark:text-red-400"
+                      : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                  )}
+                >
+                  <span className="font-semibold">{scheduleBadge.label}: </span>
+                  {formatScheduleIssue(scheduleTask?.scheduleIssue)}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <IoTimeOutline className="h-4 w-4 flex-shrink-0" />

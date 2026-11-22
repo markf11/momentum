@@ -57,6 +57,26 @@ function makeChange(
 }
 
 describe("computeDropUpdate", () => {
+  it("moves a persisted scheduler chunk by block id (drag = lock)", () => {
+    const item = makeTaskItem({
+      id: "task-1::block-2",
+      extendedProps: {
+        isTask: true,
+        taskId: "task-1",
+        blockId: "block-2",
+        isAutoScheduled: true,
+      },
+    });
+    expect(computeDropUpdate(makeChange(item), feeds)).toEqual({
+      kind: "block",
+      taskId: "task-1",
+      blockId: "block-2",
+      start: new Date("2026-06-12T16:00:00.000Z"),
+      end: new Date("2026-06-12T16:30:00.000Z"),
+      resize: false,
+    });
+  });
+
   it("moves an auto-scheduled task and pins it", () => {
     const result = computeDropUpdate(makeChange(makeTaskItem()), feeds);
 

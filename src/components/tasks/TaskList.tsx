@@ -20,6 +20,7 @@ import { useTaskListViewSettings } from "@/store/taskListViewSettings";
 
 import { EnergyLevel, Task, TaskStatus, TimePreference } from "@/types/task";
 
+import { NeedsAttention } from "./NeedsAttention";
 import { SortableHeader, StatusFilter, TaskRow } from "./components";
 import {
   compareTaskEnergyLevel,
@@ -178,6 +179,7 @@ export function TaskList({
 
   return (
     <div className="flex h-full flex-col">
+      <NeedsAttention tasks={projectFilteredTasks} onEdit={onEdit} />
       <div className="mb-4 flex items-center gap-4">
         <StatusFilter
           value={status || []}

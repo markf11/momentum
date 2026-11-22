@@ -3,6 +3,7 @@ import {
   HiClock,
   HiCloud,
   HiLockClosed,
+  HiLockOpen,
   HiMenuAlt4,
   HiPencil,
   HiRefresh,
@@ -17,8 +18,11 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 
-import { format, newDate } from "@/lib/date-utils";
+import { format, isSameDay, newDate } from "@/lib/date-utils";
+import { scheduleStatusBadge } from "@/lib/schedule-status";
 import { cn } from "@/lib/utils";
+
+import { useTaskStore } from "@/store/task";
 
 import { Task, TaskStatus } from "@/types/task";
 
@@ -47,6 +51,10 @@ export function TaskRow({
 }: TaskRowProps) {
   const { draggableProps, isDragging } = useDraggableTask(task);
   const isFutureTask = isUpcomingTask(task);
+  const chunkCount = useTaskStore(
+    (state) => state.scheduledBlocks.filter((b) => b.taskId === task.id).length
+  );
+  const badge = scheduleStatusBadge(task.scheduleStatus);
 
   return (
     <tr
@@ -238,21 +246,64 @@ export function TaskRow({
                 className="h-4 w-4 text-primary"
                 title="Auto-scheduled"
               />
-              {task.scheduleLocked && (
-                <HiLockClosed
-                  className="h-3 w-3 text-primary"
-                  title="Schedule locked"
-                />
-              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="lock-toggle"
+                className={cn(
+                  "h-6 w-6 p-1",
+                  task.scheduleLocked
+                    ? "text-amber-600 hover:text-amber-700"
+                    : "text-muted-foreground hover:text-primary"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void useTaskStore
+                    .getState()
+                    .setTaskLocked(task.id, !task.scheduleLocked);
+                }}
+                title={
+                  task.scheduleLocked
+                    ? "Locked: click to return to auto-scheduling"
+                    : "Lock at the current time"
+                }
+              >
+                {task.scheduleLocked ? (
+                  <HiLockClosed className="h-3.5 w-3.5" />
+                ) : (
+                  <HiLockOpen className="h-3.5 w-3.5" />
+                )}
+              </Button>
               {task.scheduledStart && task.scheduledEnd && (
                 <span className="text-sm text-primary">
-                  {format(newDate(task.scheduledStart), "MMM d, p")} -{" "}
-                  {format(newDate(task.scheduledEnd), "p")}
-                  {task.scheduleScore && (
+                  {format(newDate(task.scheduledStart), "MMM d, p")} →{" "}
+                  {format(
+                    newDate(task.scheduledEnd),
+                    isSameDay(
+                      newDate(task.scheduledStart),
+                      newDate(task.scheduledEnd)
+                    )
+                      ? "p"
+                      : "MMM d, p"
+                  )}
+                  {chunkCount > 1 && (
                     <span className="ml-1 text-primary/70">
-                      ({Math.round(task.scheduleScore * 100)}%)
+                      ({chunkCount} chunks)
                     </span>
                   )}
+                </span>
+              )}
+              {badge && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-xs font-medium",
+                    badge.tone === "red"
+                      ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                      : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  )}
+                  title={task.scheduleIssue ?? undefined}
+                >
+                  {badge.label}
                 </span>
               )}
             </div>

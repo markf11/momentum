@@ -51,6 +51,7 @@ interface TaskModalProps {
 
 //TODO: move to utils
 const formatEnumValue = (value: string) => {
+  if (value === Priority.ASAP) return "ASAP";
   return value
     .toLowerCase()
     .split("_")
@@ -115,6 +116,10 @@ export function TaskModal({
   const [priority, setPriority] = useState<Priority | null>(
     task?.priority || null
   );
+  const [hardDeadline, setHardDeadline] = useState(task?.hardDeadline || false);
+  const [minChunkMinutes, setMinChunkMinutes] = useState<string>(
+    task?.minChunkMinutes?.toString() || ""
+  );
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const resetForm = useCallback(() => {
@@ -123,7 +128,7 @@ export function TaskModal({
     setStatus(TaskStatus.TODO);
     setDueDate("");
     setStartDate("");
-    setDuration("");
+    setDuration("30");
     setEnergyLevel("");
     setPreferredTime("");
     setSelectedTagIds([]);
@@ -135,6 +140,8 @@ export function TaskModal({
     setIsAutoScheduled(true);
     setScheduleLocked(false);
     setPriority(null);
+    setHardDeadline(false);
+    setMinChunkMinutes("");
   }, [initialProjectId]);
 
   // Reset form when modal opens/closes
@@ -163,7 +170,7 @@ export function TaskModal({
       } else {
         setStartDate("");
       }
-      setDuration(task.duration?.toString() || "");
+      setDuration(task.duration?.toString() || "30");
       setEnergyLevel(task.energyLevel || "");
       setPreferredTime(task.preferredTime || "");
       setSelectedTagIds(task.tags.map((t) => t.id));
@@ -173,6 +180,8 @@ export function TaskModal({
       setIsAutoScheduled(task.isAutoScheduled);
       setScheduleLocked(task.scheduleLocked);
       setPriority(task.priority || null);
+      setHardDeadline(task.hardDeadline || false);
+      setMinChunkMinutes(task.minChunkMinutes?.toString() || "");
     } else if (!task && isOpen) {
       resetForm();
     }
@@ -188,6 +197,8 @@ export function TaskModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    const durationMinutes = parseInt(duration, 10);
+    if (!(durationMinutes > 0)) return;
 
     setIsSubmitting(true);
     try {
@@ -197,7 +208,9 @@ export function TaskModal({
         status,
         dueDate: dueDate ? newDate(dueDate) : null,
         startDate: startDate ? newDate(startDate) : null,
-        duration: duration ? parseInt(duration, 10) : undefined,
+        duration: durationMinutes,
+        minChunkMinutes: minChunkMinutes ? parseInt(minChunkMinutes, 10) : null,
+        hardDeadline: Boolean(dueDate) && hardDeadline,
         energyLevel: energyLevel || undefined,
         preferredTime: preferredTime || undefined,
         tagIds: selectedTagIds,
@@ -206,7 +219,9 @@ export function TaskModal({
         recurrenceRule: isRecurring ? recurrenceRule : undefined,
         isAutoScheduled,
         scheduleLocked,
-        priority,
+        // D6: four levels; an unset priority is treated as Low.
+        priority:
+          priority && priority !== Priority.NONE ? priority : Priority.LOW,
       });
       onClose();
     } catch (error) {
@@ -310,27 +325,71 @@ export function TaskModal({
                 id="duration"
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
-                min="0"
+                min="1"
+                required
               />
+            </div>
+
+            <div>
+              <Label htmlFor="minChunk">Minimum chunk (minutes)</Label>
+              <Input
+                type="number"
+                id="minChunk"
+                value={minChunkMinutes}
+                onChange={(e) => setMinChunkMinutes(e.target.value)}
+                min="5"
+                step="5"
+                placeholder="Default"
+              />
+              <p className="text-xs text-muted-foreground">
+                Split only when needed; no piece shorter than this
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="hardDeadline">Hard deadline</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="hardDeadline"
+                  checked={Boolean(dueDate) && hardDeadline}
+                  onCheckedChange={setHardDeadline}
+                  disabled={!dueDate}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {dueDate
+                    ? "Flag as past due if it can't finish in time"
+                    : "Set a due date first"}
+                </span>
+              </div>
             </div>
 
             <div>
               <Label htmlFor="priority">Priority</Label>
               <Select
-                value={priority || Priority.NONE}
+                value={
+                  priority && priority !== Priority.NONE
+                    ? priority
+                    : Priority.LOW
+                }
                 onValueChange={(value) => setPriority(value as Priority)}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="priority-select">
                   <SelectValue>
-                    {formatEnumValue(priority || Priority.NONE)}
+                    {formatEnumValue(
+                      priority && priority !== Priority.NONE
+                        ? priority
+                        : Priority.LOW
+                    )}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.values(Priority).map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {formatEnumValue(level)}
-                    </SelectItem>
-                  ))}
+                  {Object.values(Priority)
+                    .filter((level) => level !== Priority.NONE)
+                    .map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {formatEnumValue(level)}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -643,7 +702,12 @@ export function TaskModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting || !title.trim()}>
+            <Button
+              type="submit"
+              disabled={
+                isSubmitting || !title.trim() || !(parseInt(duration, 10) > 0)
+              }
+            >
               {isSubmitting ? "Saving..." : task ? "Update" : "Create"}
             </Button>
           </div>

@@ -21,6 +21,14 @@ export interface ExtendedEventProps {
   energyLevel?: string;
   preferredTime?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  // Momentum task-chunk fields
+  blockId?: string;
+  isAutoScheduled?: boolean;
+  scheduleLocked?: boolean;
+  scheduleStatus?: string | null;
+  scheduleIssue?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
 }
 
 export interface CalendarEvent {

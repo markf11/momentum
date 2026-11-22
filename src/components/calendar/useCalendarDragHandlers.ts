@@ -17,6 +17,7 @@ export function useCalendarDragHandlers() {
   const feeds = useCalendarStore((s) => s.feeds);
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const updateTask = useTaskStore((s) => s.updateTask);
+  const moveScheduledBlock = useTaskStore((s) => s.moveScheduledBlock);
 
   const applyChange = useCallback(
     async (info: EventDropArg | EventResizeDoneArg, isResize: boolean) => {
@@ -47,7 +48,14 @@ export function useCalendarDragHandlers() {
       }
 
       try {
-        if (update.kind === "task") {
+        if (update.kind === "block") {
+          await moveScheduledBlock(
+            update.blockId,
+            update.start,
+            update.end,
+            update.resize
+          );
+        } else if (update.kind === "task") {
           await updateTask(update.taskId, update.updates);
         } else {
           // No mode: the API routes resolve this row's own external event id
@@ -63,7 +71,7 @@ export function useCalendarDragHandlers() {
         toast.error(isResize ? "Failed to resize item" : "Failed to move item");
       }
     },
-    [feeds, updateEvent, updateTask]
+    [feeds, moveScheduledBlock, updateEvent, updateTask]
   );
 
   const handleEventDrop = useCallback(

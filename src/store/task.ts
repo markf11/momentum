@@ -6,6 +6,7 @@ import { isSaasEnabled } from "@/lib/config";
 import {
   NewTag,
   NewTask,
+  ScheduledBlock,
   Tag,
   Task,
   TaskFilters,
@@ -15,6 +16,8 @@ import {
 interface TaskState {
   tasks: Task[];
   tags: Tag[];
+  /** Persisted engine chunks; a task may have several. */
+  scheduledBlocks: ScheduledBlock[];
   filters: TaskFilters;
   loading: boolean;
   error: Error | null;
@@ -25,6 +28,15 @@ interface TaskState {
   updateTask: (id: string, updates: UpdateTask) => Promise<Task>;
   deleteTask: (id: string) => Promise<void>;
   setFilters: (filters: Partial<TaskFilters>) => void;
+  fetchScheduledBlocks: () => Promise<void>;
+  /** Drag-to-lock: move one chunk, lock the task, and re-plan the rest. */
+  moveScheduledBlock: (
+    blockId: string,
+    start: Date,
+    end: Date,
+    resize?: boolean
+  ) => Promise<void>;
+  setTaskLocked: (id: string, locked: boolean) => Promise<void>;
 
   // Tag actions
   fetchTags: () => Promise<void>;
@@ -44,11 +56,18 @@ interface TaskState {
   triggerScheduleAllTasks: () => Promise<void>;
 }
 
+async function loadScheduledBlocks(): Promise<ScheduledBlock[]> {
+  const response = await fetch("/api/scheduled-blocks");
+  if (!response.ok) throw new Error("Failed to fetch scheduled blocks");
+  return response.json();
+}
+
 export const useTaskStore = create<TaskState>()(
   persist(
     (set, get) => ({
       tasks: [],
       tags: [],
+      scheduledBlocks: [],
       filters: {},
       loading: false,
       error: null,
@@ -86,7 +105,12 @@ export const useTaskStore = create<TaskState>()(
           const response = await fetch(`/api/tasks?${params.toString()}`);
           if (!response.ok) throw new Error("Failed to fetch tasks");
           const tasks = await response.json();
-          set({ tasks });
+          // Set tasks and chunks together so the calendar never renders new
+          // task state against stale chunk positions.
+          const scheduledBlocks = await loadScheduledBlocks().catch(
+            () => get().scheduledBlocks
+          );
+          set({ tasks, scheduledBlocks });
         } catch (error) {
           set({ error: error as Error });
         } finally {
@@ -162,6 +186,32 @@ export const useTaskStore = create<TaskState>()(
         } finally {
           set({ loading: false });
         }
+      },
+
+      fetchScheduledBlocks: async () => {
+        try {
+          set({ scheduledBlocks: await loadScheduledBlocks() });
+        } catch (error) {
+          set({ error: error as Error });
+        }
+      },
+
+      moveScheduledBlock: async (blockId, start, end, resize = false) => {
+        const response = await fetch(`/api/scheduled-blocks/${blockId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: start.toISOString(),
+            end: end.toISOString(),
+            resize,
+          }),
+        });
+        if (!response.ok) throw new Error("Failed to move scheduled block");
+        await get().triggerScheduleAllTasks();
+      },
+
+      setTaskLocked: async (id, locked) => {
+        await get().updateTask(id, { scheduleLocked: locked });
       },
 
       setFilters: (filters: Partial<TaskFilters>) => {
@@ -388,7 +438,10 @@ export const useTaskStore = create<TaskState>()(
             updatedTasksMap.has(task.id) ? updatedTasksMap.get(task.id)! : task
           ) as Task[];
 
-          set({ tasks: mergedTasks });
+          const scheduledBlocks = await loadScheduledBlocks().catch(
+            () => get().scheduledBlocks
+          );
+          set({ tasks: mergedTasks, scheduledBlocks });
         } catch (error) {
           set({ error: error as Error });
           throw error;
@@ -402,6 +455,7 @@ export const useTaskStore = create<TaskState>()(
       partialize: (state) => ({
         tasks: state.tasks,
         tags: state.tags,
+        scheduledBlocks: state.scheduledBlocks,
       }),
     }
   )

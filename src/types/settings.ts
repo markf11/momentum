@@ -73,6 +73,12 @@ export interface AutoScheduleSettings {
   groupByProject: boolean;
   pushTasksToCalendar?: boolean; // Push scheduled task blocks to calendar
   pushTasksFeedId?: string | null; // Calendar feed ID for pushing tasks
+  // Momentum: JSON array of 7 entries (Sunday first), each {start,end} in
+  // HH:mm 15-minute steps or null for a day off.
+  workHours?: string;
+  defaultMinChunkMinutes?: number;
+  breakAfterMinutes?: number | null; // null = break rule off
+  breakDurationMinutes?: number;
 }
 
 // Define a type for log retention periods

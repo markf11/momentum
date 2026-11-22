@@ -1,9 +1,15 @@
 import { memo } from "react";
 
 import type { EventContentArg } from "@fullcalendar/core";
-import { IoCheckmarkCircle, IoRepeat, IoTimeOutline } from "react-icons/io5";
+import {
+  IoCheckmarkCircle,
+  IoLockClosed,
+  IoRepeat,
+  IoTimeOutline,
+} from "react-icons/io5";
 
 import { getMonthEventDisplay } from "@/lib/calendar-event-display";
+import { scheduleStatusBadge } from "@/lib/schedule-status";
 import { isTaskOverdue } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +42,13 @@ export const CalendarEventContent = memo(function CalendarEventContent({
   const location = eventInfo.event.extendedProps.location;
   const calendarName = eventInfo.event.extendedProps.calendarName;
   const dueDate = eventInfo.event.extendedProps?.extendedProps?.dueDate;
+  const scheduleStatus =
+    eventInfo.event.extendedProps?.extendedProps?.scheduleStatus;
+  const scheduleIssue =
+    eventInfo.event.extendedProps?.extendedProps?.scheduleIssue;
+  const scheduleLocked =
+    eventInfo.event.extendedProps?.extendedProps?.scheduleLocked;
+  const badge = isTask ? scheduleStatusBadge(scheduleStatus) : null;
   const title = eventInfo.event.title;
   const endTime = eventInfo.event.end?.getTime() ?? 0;
   const startTime = eventInfo.event.start?.getTime() ?? 0;
@@ -81,8 +94,13 @@ export const CalendarEventContent = memo(function CalendarEventContent({
             "border-gray-500": status === TaskStatus.TODO,
           },
         isOverdue && "border-red-500 font-medium text-red-600",
+        badge?.tone === "red" && "border-red-500",
+        badge?.tone === "amber" && "border-amber-500",
         status === TaskStatus.COMPLETED && "text-gray-500 line-through"
       )}
+      title={
+        badge && scheduleIssue ? `${badge.label}: ${scheduleIssue}` : undefined
+      }
     >
       <div className="flex w-full items-center gap-1.5">
         {isTask ? (
@@ -123,6 +141,23 @@ export const CalendarEventContent = memo(function CalendarEventContent({
             {title}
           </div>
         </div>
+        {isTask && scheduleLocked && (
+          <IoLockClosed
+            className="h-3 w-3 flex-shrink-0 opacity-75"
+            aria-label="Locked"
+          />
+        )}
+        {badge && (
+          <span
+            data-testid="schedule-badge"
+            className={cn(
+              "flex-shrink-0 rounded px-1 text-[9px] font-semibold uppercase leading-4 text-white",
+              badge.tone === "red" ? "bg-red-600" : "bg-amber-500"
+            )}
+          >
+            {badge.label}
+          </span>
+        )}
       </div>
       {location && duration > 1800000 && (
         <div className="event-location truncate pl-5 text-[10px] leading-snug opacity-80">

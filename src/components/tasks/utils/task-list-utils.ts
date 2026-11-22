@@ -98,6 +98,7 @@ export const taskMatchesListFilters = (
 
 // Helper function to format enum values for display
 export const formatEnumValue = (value: string) => {
+  if (value === Priority.ASAP) return "ASAP";
   return value
     .toLowerCase()
     .split("_")
@@ -143,6 +144,7 @@ export const PRIORITY_SORT_RANK: Partial<Record<Priority, number>> = {
   [Priority.LOW]: 1,
   [Priority.MEDIUM]: 2,
   [Priority.HIGH]: 3,
+  [Priority.ASAP]: 4,
 };
 
 // Semantic rank for the Energy column (low < medium < high).

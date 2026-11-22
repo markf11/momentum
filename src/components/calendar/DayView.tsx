@@ -164,7 +164,9 @@ export function DayView({ currentDate, onDateClick }: DayViewProps) {
     setClickedElement(info.el);
 
     if (isTask) {
-      const task = useTaskStore.getState().tasks.find((t) => t.id === itemId);
+      // Chunk blocks have their own event id; the task id rides in extendedProps.
+      const taskId = item.extendedProps?.taskId ?? itemId;
+      const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
       if (task) {
         setQuickViewItem(task);
         setIsTask(true);

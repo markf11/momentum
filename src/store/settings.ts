@@ -102,6 +102,18 @@ const defaultSettings: Settings & { accounts: ConnectedAccount[] } = {
     lowEnergyStart: 15, // 3 PM
     lowEnergyEnd: 20, // 8 PM
     groupByProject: false,
+    workHours: JSON.stringify([
+      null,
+      { start: "09:00", end: "17:00" },
+      { start: "09:00", end: "17:00" },
+      { start: "09:00", end: "17:00" },
+      { start: "09:00", end: "17:00" },
+      { start: "09:00", end: "17:00" },
+      null,
+    ]),
+    defaultMinChunkMinutes: 30,
+    breakAfterMinutes: null,
+    breakDurationMinutes: 15,
   },
   system: {
     googleClientId: undefined,
@@ -457,6 +469,10 @@ export const useSettingsStore = create<SettingsStore>()(
             lowEnergyStart: autoScheduleSettings.lowEnergyStart,
             lowEnergyEnd: autoScheduleSettings.lowEnergyEnd,
             groupByProject: autoScheduleSettings.groupByProject,
+            workHours: autoScheduleSettings.workHours,
+            defaultMinChunkMinutes: autoScheduleSettings.defaultMinChunkMinutes,
+            breakAfterMinutes: autoScheduleSettings.breakAfterMinutes,
+            breakDurationMinutes: autoScheduleSettings.breakDurationMinutes,
           });
 
           get().updateSystemSettings({
