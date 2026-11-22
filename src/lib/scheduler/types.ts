@@ -45,7 +45,14 @@ export interface BusyEvent {
   end: Date;
   /** Free events do not consume scheduling capacity. */
   busy?: boolean;
+  /**
+   * RRULE, bare ("FREQ=WEEKLY;BYDAY=MO") or as RFC 5545 lines that may
+   * include EXDATE. Occurrences are expanded from `start` in the user's
+   * timezone and last `end - start`.
+   */
   recurrenceRule?: string | null;
+  /** Occurrence starts (absolute instants) excluded from the series. */
+  exdates?: readonly Date[];
 }
 
 export interface BreakRule {

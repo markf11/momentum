@@ -162,17 +162,34 @@ function freeIntervals(
   return free.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-function parseRule(rule: string, anchor: Date, timeZone: string): RRule {
-  const normalized = rule.replace(/^RRULE:/, "");
+const TASK_FREQUENCIES: readonly number[] = [
+  RRule.DAILY,
+  RRule.WEEKLY,
+  RRule.MONTHLY,
+];
+const EVENT_FREQUENCIES: readonly number[] = [
+  RRule.DAILY,
+  RRule.WEEKLY,
+  RRule.MONTHLY,
+  RRule.YEARLY,
+];
+
+function parseRule(
+  rule: string,
+  anchor: Date,
+  timeZone: string,
+  frequencies: readonly number[] = TASK_FREQUENCIES
+): RRule {
+  const normalized = rule.trim().replace(/^RRULE:/i, "");
   // parseString, unlike fromString, does not invent BYHOUR/BYMINUTE/BYSECOND
   // values from the wall clock when DTSTART is omitted.
   const options = RRule.parseString(normalized);
-  if (
-    options.freq !== RRule.DAILY &&
-    options.freq !== RRule.WEEKLY &&
-    options.freq !== RRule.MONTHLY
-  ) {
-    throw new Error("Only daily, weekly, and monthly RRULEs are supported");
+  if (options.freq === undefined || !frequencies.includes(options.freq)) {
+    throw new Error(
+      frequencies.includes(RRule.YEARLY)
+        ? "Only daily, weekly, monthly, and yearly RRULEs are supported"
+        : "Only daily, weekly, and monthly RRULEs are supported"
+    );
   }
   return new RRule({
     ...options,
@@ -186,9 +203,10 @@ function expandOccurrences(
   anchor: Date,
   timeZone: string,
   rangeStart: Date,
-  rangeEnd: Date
+  rangeEnd: Date,
+  frequencies: readonly number[] = TASK_FREQUENCIES
 ): Date[] {
-  const parsed = parseRule(rule, anchor, timeZone);
+  const parsed = parseRule(rule, anchor, timeZone, frequencies);
   return parsed
     .between(
       floatingDate(rangeStart, timeZone),
@@ -196,6 +214,72 @@ function expandOccurrences(
       true
     )
     .map((occurrence) => fromZonedTime(floatingString(occurrence), timeZone));
+}
+
+type RecurrenceSet = {
+  rule: string;
+  /** Excluded occurrence instants (ms). */
+  exInstants: Set<number>;
+  /** Excluded local dates (yyyy-MM-dd in the user's timezone). */
+  exDates: Set<string>;
+};
+
+/**
+ * Splits stored recurrence text into its RRULE and EXDATE parts. Accepts a
+ * bare rule ("FREQ=WEEKLY;BYDAY=MO"), an "RRULE:" line, or RFC 5545 lines
+ * (RRULE/EXDATE/DTSTART). DTSTART is ignored: the event start is the anchor.
+ */
+function parseRecurrenceSet(text: string, timeZone: string): RecurrenceSet {
+  const lines = text
+    .replace(/\r?\n[ \t]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const set: RecurrenceSet = {
+    rule: "",
+    exInstants: new Set(),
+    exDates: new Set(),
+  };
+  for (const line of lines) {
+    const colon = line.indexOf(":");
+    const head = colon >= 0 ? line.slice(0, colon) : "";
+    const name = head.split(";")[0].toUpperCase();
+    if (name === "EXDATE") {
+      const params = head.split(";").slice(1);
+      const tzid = params
+        .find((param) => param.toUpperCase().startsWith("TZID="))
+        ?.slice(5);
+      for (const value of line.slice(colon + 1).split(",")) {
+        const match = value
+          .trim()
+          .match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/);
+        if (!match) continue;
+        const [, year, month, day, hour, minute, second, utc] = match;
+        const date = `${year}-${month}-${day}`;
+        if (hour === undefined) {
+          set.exDates.add(date);
+        } else if (utc) {
+          set.exInstants.add(
+            Date.UTC(+year, +month - 1, +day, +hour, +minute, +second)
+          );
+        } else {
+          set.exInstants.add(
+            fromZonedTime(
+              `${date}T${hour}:${minute}:${second}`,
+              tzid || timeZone
+            ).getTime()
+          );
+        }
+      }
+    } else if (name === "RRULE") {
+      set.rule = line.slice(colon + 1);
+    } else if (name === "" && /FREQ=/i.test(line)) {
+      set.rule = line;
+    }
+    // DTSTART is anchored on the event start; RDATE is not supported.
+  }
+  if (!set.rule) throw new Error("Recurrence text has no RRULE");
+  return set;
 }
 
 function expandTask(task: SchedulerTask, input: SchedulerInput): Unit[] {
@@ -528,6 +612,13 @@ function planUnit(
   return { allocations, occupied: draftOccupied, work: draftWork };
 }
 
+/**
+ * Busy intervals inside [now, horizonEnd). A recurring event blocks every
+ * occurrence: the RRULE is expanded as floating wall-clock time in the user's
+ * timezone (so a 10:00 meeting stays at 10:00 across DST), each occurrence
+ * keeps the event's duration, and EXDATEs (in the rule text or `exdates`)
+ * leave their occurrence free.
+ */
 function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
   const intervals: Interval[] = [];
   for (const event of input.busyEvents ?? []) {
@@ -542,14 +633,28 @@ function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
       continue;
     }
     try {
+      const set = parseRecurrenceSet(event.recurrenceRule, input.timeZone);
+      for (const exdate of event.exdates ?? []) {
+        set.exInstants.add(new Date(exdate).getTime());
+      }
       const duration = event.end.getTime() - event.start.getTime();
       for (const occurrence of expandOccurrences(
-        event.recurrenceRule,
+        set.rule,
         event.start,
         input.timeZone,
         new Date(input.now.getTime() - duration),
-        horizonEnd
+        horizonEnd,
+        EVENT_FREQUENCIES
       )) {
+        if (set.exInstants.has(occurrence.getTime())) continue;
+        if (
+          set.exDates.size > 0 &&
+          set.exDates.has(
+            formatInTimeZone(occurrence, input.timeZone, "yyyy-MM-dd")
+          )
+        ) {
+          continue;
+        }
         add(occurrence, new Date(occurrence.getTime() + duration));
       }
     } catch {
@@ -561,9 +666,10 @@ function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
 }
 
 /**
- * Schedules tasks in one deterministic pass. Daily/weekly/monthly RRULEs are
- * expanded as floating wall-clock occurrences in the user's IANA timezone;
- * EXDATE/RDATE sets and other frequencies are intentionally not supported.
+ * Schedules tasks in one deterministic pass. Task RRULEs (daily/weekly/
+ * monthly) and busy-event RRULEs (also yearly, with EXDATE) are expanded as
+ * floating wall-clock occurrences in the user's IANA timezone; RDATE and other
+ * frequencies are intentionally not supported.
  */
 export function scheduleTasks(input: SchedulerInput): SchedulerOutput {
   const horizonDays = input.horizonDays ?? 31;

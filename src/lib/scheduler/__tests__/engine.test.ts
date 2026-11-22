@@ -50,6 +50,19 @@ function minutes(block: SchedulerBlock): number {
   return (block.end.getTime() - block.start.getTime()) / 60_000;
 }
 
+function localTimes(blocks: SchedulerBlock[]): string[] {
+  return blocks.map((block) =>
+    formatInTimeZone(block.start, "America/New_York", "yyyy-MM-dd HH:mm")
+  );
+}
+
+function overlaps(
+  block: SchedulerBlock,
+  busy: { start: number; end: number }
+): boolean {
+  return block.start.getTime() < busy.end && block.end.getTime() > busy.start;
+}
+
 function expectNoOverlaps(blocks: SchedulerBlock[]): void {
   const sorted = [...blocks].sort(
     (a, b) => a.start.getTime() - b.start.getTime()
@@ -447,5 +460,198 @@ describe("scheduleTasks", () => {
       6_000
     );
     expectNoOverlaps(result.blocks);
+  });
+  describe("recurring busy events", () => {
+    // Mondays only, 09:00-12:00 New York: 3h a week, 5 Mondays in the window.
+    const MONDAYS: WorkWeek = [
+      null,
+      { start: "09:00", end: "12:00" },
+      null,
+      null,
+      null,
+      null,
+      null,
+    ];
+    // Weekly 10:00-11:00 New York meeting, 2027-03-08 is EST, 03-15 is EDT.
+    const meeting = {
+      id: "standup",
+      start: new Date("2027-03-08T15:00:00.000Z"),
+      end: new Date("2027-03-08T16:00:00.000Z"),
+    };
+    const hourTasks = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        task({
+          id: `t-${index.toString().padStart(2, "0")}`,
+          durationMinutes: 60,
+          minChunkMinutes: 60,
+        })
+      );
+    const mondays = [
+      "2027-03-08",
+      "2027-03-15",
+      "2027-03-22",
+      "2027-03-29",
+      "2027-04-05",
+    ];
+
+    it("blocks every weekly occurrence in the window, not just the first", () => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(10),
+          busyEvents: [{ ...meeting, recurrenceRule: "FREQ=WEEKLY" }],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+
+      expect(result.tasks.every((item) => item.status === "on_time")).toBe(
+        true
+      );
+      expect(localTimes(result.blocks)).toEqual(
+        mondays.flatMap((day) => [`${day} 09:00`, `${day} 11:00`])
+      );
+      // 5 occurrences leave exactly 10 free hours: an 11th hour can't fit.
+      const full = scheduleTasks(
+        input({
+          tasks: hourTasks(11),
+          busyEvents: [{ ...meeting, recurrenceRule: "RRULE:FREQ=WEEKLY" }],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+      expect(
+        full.tasks.filter((item) => item.status === "cant_fit")
+      ).toHaveLength(1);
+    });
+
+    it("keeps a DST-week occurrence at its local wall time", () => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(4),
+          busyEvents: [{ ...meeting, recurrenceRule: "FREQ=WEEKLY;BYDAY=MO" }],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+
+      // 2027-03-15 10:00 EDT is 14:00Z (the series started at 15:00Z in EST).
+      const dstWeek = result.blocks.filter(
+        (block) =>
+          formatInTimeZone(block.start, "America/New_York", "yyyy-MM-dd") ===
+          "2027-03-15"
+      );
+      expect(
+        dstWeek.map((block) => [
+          block.start.toISOString(),
+          block.end.toISOString(),
+        ])
+      ).toEqual([
+        ["2027-03-15T13:00:00.000Z", "2027-03-15T14:00:00.000Z"],
+        ["2027-03-15T15:00:00.000Z", "2027-03-15T16:00:00.000Z"],
+      ]);
+      const occurrence = {
+        start: Date.parse("2027-03-15T14:00:00.000Z"),
+        end: Date.parse("2027-03-15T15:00:00.000Z"),
+      };
+      expect(result.blocks.some((block) => overlaps(block, occurrence))).toBe(
+        false
+      );
+    });
+
+    it("expands a series that started before the window", () => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(10),
+          busyEvents: [
+            {
+              // First occurrence 2027-01-04 10:00 EST.
+              start: new Date("2027-01-04T15:00:00.000Z"),
+              end: new Date("2027-01-04T16:00:00.000Z"),
+              recurrenceRule: "FREQ=WEEKLY;BYDAY=MO",
+            },
+          ],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+      expect(localTimes(result.blocks)).toEqual(
+        mondays.flatMap((day) => [`${day} 09:00`, `${day} 11:00`])
+      );
+    });
+
+    it.each([
+      [
+        "a TZID EXDATE line",
+        "RRULE:FREQ=WEEKLY\nEXDATE;TZID=America/New_York:20270322T100000",
+        undefined,
+      ],
+      [
+        "a UTC EXDATE line",
+        "RRULE:FREQ=WEEKLY\nEXDATE:20270322T140000Z",
+        undefined,
+      ],
+      [
+        "a DATE EXDATE line",
+        "FREQ=WEEKLY\r\nEXDATE;VALUE=DATE:20270322",
+        undefined,
+      ],
+      [
+        "the exdates field",
+        "FREQ=WEEKLY",
+        [new Date("2027-03-22T14:00:00.000Z")],
+      ],
+    ])("leaves an occurrence excluded by %s free", (_, rule, exdates) => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(11),
+          busyEvents: [{ ...meeting, recurrenceRule: rule, exdates }],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+
+      expect(result.tasks.every((item) => item.status === "on_time")).toBe(
+        true
+      );
+      expect(localTimes(result.blocks)).toContain("2027-03-22 10:00");
+      expect(localTimes(result.blocks)).not.toContain("2027-03-15 10:00");
+      expect(localTimes(result.blocks)).not.toContain("2027-03-29 10:00");
+    });
+
+    it("respects the event duration and COUNT", () => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(13),
+          busyEvents: [
+            {
+              // 10:00-11:30, two occurrences only.
+              start: new Date("2027-03-08T15:00:00.000Z"),
+              end: new Date("2027-03-08T16:30:00.000Z"),
+              recurrenceRule: "FREQ=WEEKLY;COUNT=2",
+            },
+          ],
+          settings: { workWeek: MONDAYS, defaultMinChunkMinutes: 30 },
+        })
+      );
+      const times = localTimes(result.blocks);
+      expect(times.filter((time) => time.startsWith("2027-03-08"))).toEqual([
+        "2027-03-08 09:00",
+      ]);
+      expect(times.filter((time) => time.startsWith("2027-03-22"))).toEqual([
+        "2027-03-22 09:00",
+        "2027-03-22 10:00",
+        "2027-03-22 11:00",
+      ]);
+    });
+
+    it("ignores free recurring events", () => {
+      const result = scheduleTasks(
+        input({
+          tasks: hourTasks(15),
+          busyEvents: [
+            { ...meeting, busy: false, recurrenceRule: "FREQ=WEEKLY" },
+          ],
+          settings: { workWeek: MONDAYS },
+        })
+      );
+      expect(result.tasks.every((item) => item.status === "on_time")).toBe(
+        true
+      );
+    });
   });
 });

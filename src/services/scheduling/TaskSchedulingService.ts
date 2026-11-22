@@ -21,6 +21,8 @@ import {
   TimePreference,
 } from "@/types/task";
 
+import { toBusyEvents } from "./busy-events";
+
 const LOG_SOURCE = "TaskSchedulingService";
 const STATUS_SEVERITY: Record<ScheduleStatus, number> = {
   unscheduled: 0,
@@ -160,12 +162,7 @@ export async function scheduleAllTasksForUser(
 
     const output = scheduleTasks({
       tasks: engineTasks,
-      busyEvents: busyEvents.map((event) => ({
-        id: event.id,
-        start: event.start,
-        end: event.end,
-        recurrenceRule: event.isMaster ? event.recurrenceRule : null,
-      })),
+      busyEvents: toBusyEvents(busyEvents),
       settings: {
         workWeek: parseWorkWeek(settings),
         defaultMinChunkMinutes: settings.defaultMinChunkMinutes,
