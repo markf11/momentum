@@ -162,17 +162,34 @@ function freeIntervals(
   return free.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-function parseRule(rule: string, anchor: Date, timeZone: string): RRule {
-  const normalized = rule.replace(/^RRULE:/, "");
+const TASK_FREQUENCIES: readonly number[] = [
+  RRule.DAILY,
+  RRule.WEEKLY,
+  RRule.MONTHLY,
+];
+const EVENT_FREQUENCIES: readonly number[] = [
+  RRule.DAILY,
+  RRule.WEEKLY,
+  RRule.MONTHLY,
+  RRule.YEARLY,
+];
+
+function parseRule(
+  rule: string,
+  anchor: Date,
+  timeZone: string,
+  frequencies: readonly number[] = TASK_FREQUENCIES
+): RRule {
+  const normalized = rule.trim().replace(/^RRULE:/i, "");
   // parseString, unlike fromString, does not invent BYHOUR/BYMINUTE/BYSECOND
   // values from the wall clock when DTSTART is omitted.
   const options = RRule.parseString(normalized);
-  if (
-    options.freq !== RRule.DAILY &&
-    options.freq !== RRule.WEEKLY &&
-    options.freq !== RRule.MONTHLY
-  ) {
-    throw new Error("Only daily, weekly, and monthly RRULEs are supported");
+  if (options.freq === undefined || !frequencies.includes(options.freq)) {
+    throw new Error(
+      frequencies.includes(RRule.YEARLY)
+        ? "Only daily, weekly, monthly, and yearly RRULEs are supported"
+        : "Only daily, weekly, and monthly RRULEs are supported"
+    );
   }
   return new RRule({
     ...options,
@@ -186,9 +203,10 @@ function expandOccurrences(
   anchor: Date,
   timeZone: string,
   rangeStart: Date,
-  rangeEnd: Date
+  rangeEnd: Date,
+  frequencies: readonly number[] = TASK_FREQUENCIES
 ): Date[] {
-  const parsed = parseRule(rule, anchor, timeZone);
+  const parsed = parseRule(rule, anchor, timeZone, frequencies);
   return parsed
     .between(
       floatingDate(rangeStart, timeZone),
@@ -196,6 +214,72 @@ function expandOccurrences(
       true
     )
     .map((occurrence) => fromZonedTime(floatingString(occurrence), timeZone));
+}
+
+type RecurrenceSet = {
+  rule: string;
+  /** Excluded occurrence instants (ms). */
+  exInstants: Set<number>;
+  /** Excluded local dates (yyyy-MM-dd in the user's timezone). */
+  exDates: Set<string>;
+};
+
+/**
+ * Splits stored recurrence text into its RRULE and EXDATE parts. Accepts a
+ * bare rule ("FREQ=WEEKLY;BYDAY=MO"), an "RRULE:" line, or RFC 5545 lines
+ * (RRULE/EXDATE/DTSTART). DTSTART is ignored: the event start is the anchor.
+ */
+function parseRecurrenceSet(text: string, timeZone: string): RecurrenceSet {
+  const lines = text
+    .replace(/\r?\n[ \t]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const set: RecurrenceSet = {
+    rule: "",
+    exInstants: new Set(),
+    exDates: new Set(),
+  };
+  for (const line of lines) {
+    const colon = line.indexOf(":");
+    const head = colon >= 0 ? line.slice(0, colon) : "";
+    const name = head.split(";")[0].toUpperCase();
+    if (name === "EXDATE") {
+      const params = head.split(";").slice(1);
+      const tzid = params
+        .find((param) => param.toUpperCase().startsWith("TZID="))
+        ?.slice(5);
+      for (const value of line.slice(colon + 1).split(",")) {
+        const match = value
+          .trim()
+          .match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/);
+        if (!match) continue;
+        const [, year, month, day, hour, minute, second, utc] = match;
+        const date = `${year}-${month}-${day}`;
+        if (hour === undefined) {
+          set.exDates.add(date);
+        } else if (utc) {
+          set.exInstants.add(
+            Date.UTC(+year, +month - 1, +day, +hour, +minute, +second)
+          );
+        } else {
+          set.exInstants.add(
+            fromZonedTime(
+              `${date}T${hour}:${minute}:${second}`,
+              tzid || timeZone
+            ).getTime()
+          );
+        }
+      }
+    } else if (name === "RRULE") {
+      set.rule = line.slice(colon + 1);
+    } else if (name === "" && /FREQ=/i.test(line)) {
+      set.rule = line;
+    }
+    // DTSTART is anchored on the event start; RDATE is not supported.
+  }
+  if (!set.rule) throw new Error("Recurrence text has no RRULE");
+  return set;
 }
 
 function expandTask(task: SchedulerTask, input: SchedulerInput): Unit[] {
@@ -361,32 +445,97 @@ function shortenPreviousChunks(
 }
 
 /**
- * Task time worked back-to-back ending at `at`. A gap of at least one break
- * length (a meeting, the end of the day) counts as the break and ends the run.
+ * Task time already in the run that [start, end] would join: work chained to
+ * it, in either direction, by gaps shorter than one break. A gap of at least
+ * one break length (a meeting, the end of the day) counts as the break.
  */
-function contiguousRunBefore(
-  at: number,
+function joinedRun(
+  start: number,
+  end: number,
   work: readonly Interval[],
   breakMs: number
 ): number {
-  let cursor = at;
+  let low = start;
+  let high = end;
   let total = 0;
-  for (;;) {
-    let previous: Interval | null = null;
-    for (const interval of work) {
-      if (
-        interval.end <= cursor &&
-        interval.end > cursor - breakMs &&
-        interval.start < cursor &&
-        (!previous || interval.end > previous.end)
-      ) {
-        previous = interval;
+  const joined = new Set<number>();
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let index = 0; index < work.length; index += 1) {
+      if (joined.has(index)) continue;
+      const interval = work[index];
+      if (interval.end > low - breakMs && interval.start < high + breakMs) {
+        joined.add(index);
+        total += interval.end - interval.start;
+        if (interval.start < low) low = interval.start;
+        if (interval.end > high) high = interval.end;
+        changed = true;
       }
     }
-    if (!previous) return total;
-    total += previous.end - previous.start;
-    cursor = previous.start;
   }
+  return total;
+}
+
+/**
+ * Longest piece starting at `start` (at most `room`) whose run, including
+ * work before and after it, stays within `limit`. Run length grows
+ * monotonically with the piece, so whole minutes are binary-searched.
+ */
+function longestWithinBreakLimit(
+  start: number,
+  room: number,
+  work: readonly Interval[],
+  breakMs: number,
+  limit: number
+): number {
+  const fits = (length: number) =>
+    length + joinedRun(start, start + length, work, breakMs) <= limit;
+  if (room <= 0) return 0;
+  if (fits(room)) return room;
+  let low = 0;
+  let high = Math.floor(room / MINUTE);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fits(middle * MINUTE)) low = middle;
+    else high = middle - 1;
+  }
+  return low * MINUTE;
+}
+
+/**
+ * Break rule (D12), as an invariant over the final schedule: wherever a piece
+ * goes, no run of task blocks may exceed the limit, counting work already
+ * placed before *and* after it (later placements can fill earlier gaps).
+ * Locked blocks count but never move. Tries the free interval's start, then
+ * the start after a break from the preceding run.
+ */
+function breakPlacement(
+  interval: Interval,
+  needed: number,
+  remaining: number,
+  work: readonly Interval[],
+  breakMs: number,
+  limit: number
+): { start: number; cap: number } | null {
+  const starts = [interval.start];
+  let previousEnd = -Infinity;
+  for (const item of work) {
+    if (
+      item.end <= interval.start &&
+      item.end > interval.start - breakMs &&
+      item.end > previousEnd
+    ) {
+      previousEnd = item.end;
+    }
+  }
+  if (previousEnd > -Infinity) starts.push(previousEnd + breakMs);
+  for (const start of starts) {
+    if (start >= interval.end) continue;
+    const room = Math.min(interval.end - start, remaining, limit);
+    const cap = longestWithinBreakLimit(start, room, work, breakMs, limit);
+    if (cap >= needed) return { start, cap };
+  }
+  return null;
 }
 
 function planUnit(
@@ -455,29 +604,31 @@ function planUnit(
 
     if (!interval) return null;
 
-    // Break rule (D12): after `afterMinutes` of back-to-back task time, the
-    // next piece of work starts after a break; no piece runs past the limit.
     let start = interval.start;
     let breakSlot: Interval | null = null;
     let cap = Infinity;
     if (breakOn) {
-      const run = contiguousRunBefore(
-        start,
+      const needed =
+        allocations.length > 0 && remaining < minChunk * MINUTE
+          ? minChunk * MINUTE
+          : Math.min(remaining, minChunk * MINUTE);
+      const placement = breakPlacement(
+        interval,
+        needed,
+        // A sub-minimum tail grows to the minimum by shortening earlier chunks.
+        Math.max(remaining, needed),
         [...taskWork, ...draftWork],
-        breakLength
+        breakLength,
+        breakAfter
       );
-      const needed = Math.min(remaining, minChunk * MINUTE);
-      if (run > 0 && run + needed > breakAfter) {
-        breakSlot = { start, end: start + breakLength };
-        start = breakSlot.end;
-        cap = breakAfter;
-      } else {
-        cap = breakAfter - run;
-      }
-      if (interval.end - start < Math.min(needed, cap)) {
+      if (!placement) {
         searchAfter = interval.end;
         continue;
       }
+      start = placement.start;
+      cap = placement.cap;
+      if (start > interval.start)
+        breakSlot = { start: interval.start, end: start };
     }
     const capacity = Math.min(interval.end - start, cap);
 
@@ -528,6 +679,13 @@ function planUnit(
   return { allocations, occupied: draftOccupied, work: draftWork };
 }
 
+/**
+ * Busy intervals inside [now, horizonEnd). A recurring event blocks every
+ * occurrence: the RRULE is expanded as floating wall-clock time in the user's
+ * timezone (so a 10:00 meeting stays at 10:00 across DST), each occurrence
+ * keeps the event's duration, and EXDATEs (in the rule text or `exdates`)
+ * leave their occurrence free.
+ */
 function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
   const intervals: Interval[] = [];
   for (const event of input.busyEvents ?? []) {
@@ -542,14 +700,28 @@ function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
       continue;
     }
     try {
+      const set = parseRecurrenceSet(event.recurrenceRule, input.timeZone);
+      for (const exdate of event.exdates ?? []) {
+        set.exInstants.add(new Date(exdate).getTime());
+      }
       const duration = event.end.getTime() - event.start.getTime();
       for (const occurrence of expandOccurrences(
-        event.recurrenceRule,
+        set.rule,
         event.start,
         input.timeZone,
         new Date(input.now.getTime() - duration),
-        horizonEnd
+        horizonEnd,
+        EVENT_FREQUENCIES
       )) {
+        if (set.exInstants.has(occurrence.getTime())) continue;
+        if (
+          set.exDates.size > 0 &&
+          set.exDates.has(
+            formatInTimeZone(occurrence, input.timeZone, "yyyy-MM-dd")
+          )
+        ) {
+          continue;
+        }
         add(occurrence, new Date(occurrence.getTime() + duration));
       }
     } catch {
@@ -561,9 +733,10 @@ function expandBusyEvents(input: SchedulerInput, horizonEnd: Date): Interval[] {
 }
 
 /**
- * Schedules tasks in one deterministic pass. Daily/weekly/monthly RRULEs are
- * expanded as floating wall-clock occurrences in the user's IANA timezone;
- * EXDATE/RDATE sets and other frequencies are intentionally not supported.
+ * Schedules tasks in one deterministic pass. Task RRULEs (daily/weekly/
+ * monthly) and busy-event RRULEs (also yearly, with EXDATE) are expanded as
+ * floating wall-clock occurrences in the user's IANA timezone; RDATE and other
+ * frequencies are intentionally not supported.
  */
 export function scheduleTasks(input: SchedulerInput): SchedulerOutput {
   const horizonDays = input.horizonDays ?? 31;
