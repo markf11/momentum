@@ -79,6 +79,9 @@ jest.mock("@/lib/auth/api-auth", () => ({
   authenticateRequest: jest.fn(async () => ({ userId: "u1" })),
 }));
 jest.mock("@/lib/replan-coordinator", () => ({ requestReplan: jest.fn() }));
+jest.mock("@/lib/user-timezone", () => ({
+  getUserTimeZone: jest.fn(async () => "UTC"),
+}));
 jest.mock("@/lib/task-block-push", () => ({
   schedulePushTaskBlock: jest.fn(),
   deleteTaskBlockEvent: jest.fn(),
