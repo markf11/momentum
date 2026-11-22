@@ -1,8 +1,8 @@
 {
-  "name": "fluid-calendar",
+  "name": "momentum",
   "version": "1.5.0",
   "private": true,
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22.11.0"
   },
