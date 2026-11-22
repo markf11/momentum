@@ -207,11 +207,20 @@ export async function scheduleAllTasksForUser(
 
     // Existing future locks are already in the database and must not be
     // deleted or inserted twice. Legacy/synthetic locks are inserted below.
+    // Only tasks the engine kept locked: it rounds "now" up to the minute, so a
+    // lock ending within the current minute has already expired there and
+    // must not be preserved here either.
+    const engineLockedTaskIds = new Set(
+      output.tasks
+        .filter((result) => result.status === "locked")
+        .map((result) => result.taskId)
+    );
     const preservedLockedTaskIds = new Set(
       tasks
         .filter(
           (task) =>
             task.scheduleLocked &&
+            engineLockedTaskIds.has(task.id) &&
             (blocksByTask.get(task.id) ?? []).some(
               (block) => block.locked && block.end.getTime() > now.getTime()
             )
