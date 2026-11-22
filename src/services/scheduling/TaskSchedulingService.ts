@@ -21,6 +21,8 @@ import {
   TimePreference,
 } from "@/types/task";
 
+import { filterEventsBySelectedCalendars } from "./calendar-selection";
+
 const LOG_SOURCE = "TaskSchedulingService";
 const STATUS_SEVERITY: Record<ScheduleStatus, number> = {
   unscheduled: 0,
@@ -112,8 +114,8 @@ export async function scheduleAllTasksForUser(
       },
     });
 
-    const [userSettings, tasks, existingBlocks, busyEvents] = await Promise.all(
-      [
+    const [userSettings, tasks, existingBlocks, candidateEvents, feeds] =
+      await Promise.all([
         prisma.userSettings.findUnique({ where: { userId } }),
         prisma.task.findMany({
           where: { userId, status: { not: TaskStatus.COMPLETED } },
@@ -123,7 +125,16 @@ export async function scheduleAllTasksForUser(
         prisma.calendarEvent.findMany({
           where: { feed: { userId, type: "LOCAL" } },
         }),
-      ]
+        prisma.calendarFeed.findMany({
+          where: { userId },
+          select: { id: true },
+        }),
+      ]);
+    // "Calendars to consider": filtered here, before the engine sees them.
+    const busyEvents = filterEventsBySelectedCalendars(
+      candidateEvents,
+      settings.selectedCalendars,
+      feeds.map((feed) => feed.id)
     );
 
     const blocksByTask = new Map<string, typeof existingBlocks>();
