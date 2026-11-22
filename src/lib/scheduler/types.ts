@@ -56,7 +56,10 @@ export interface BusyEvent {
 }
 
 export interface BreakRule {
-  /** Insert a break once this much task time has been scheduled. */
+  /**
+   * No contiguous run of task blocks (gaps shorter than the break count as
+   * contiguous) holds more than this much task time.
+   */
   afterMinutes: number;
   durationMinutes: number;
 }

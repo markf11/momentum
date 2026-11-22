@@ -445,32 +445,97 @@ function shortenPreviousChunks(
 }
 
 /**
- * Task time worked back-to-back ending at `at`. A gap of at least one break
- * length (a meeting, the end of the day) counts as the break and ends the run.
+ * Task time already in the run that [start, end] would join: work chained to
+ * it, in either direction, by gaps shorter than one break. A gap of at least
+ * one break length (a meeting, the end of the day) counts as the break.
  */
-function contiguousRunBefore(
-  at: number,
+function joinedRun(
+  start: number,
+  end: number,
   work: readonly Interval[],
   breakMs: number
 ): number {
-  let cursor = at;
+  let low = start;
+  let high = end;
   let total = 0;
-  for (;;) {
-    let previous: Interval | null = null;
-    for (const interval of work) {
-      if (
-        interval.end <= cursor &&
-        interval.end > cursor - breakMs &&
-        interval.start < cursor &&
-        (!previous || interval.end > previous.end)
-      ) {
-        previous = interval;
+  const joined = new Set<number>();
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let index = 0; index < work.length; index += 1) {
+      if (joined.has(index)) continue;
+      const interval = work[index];
+      if (interval.end > low - breakMs && interval.start < high + breakMs) {
+        joined.add(index);
+        total += interval.end - interval.start;
+        if (interval.start < low) low = interval.start;
+        if (interval.end > high) high = interval.end;
+        changed = true;
       }
     }
-    if (!previous) return total;
-    total += previous.end - previous.start;
-    cursor = previous.start;
   }
+  return total;
+}
+
+/**
+ * Longest piece starting at `start` (at most `room`) whose run, including
+ * work before and after it, stays within `limit`. Run length grows
+ * monotonically with the piece, so whole minutes are binary-searched.
+ */
+function longestWithinBreakLimit(
+  start: number,
+  room: number,
+  work: readonly Interval[],
+  breakMs: number,
+  limit: number
+): number {
+  const fits = (length: number) =>
+    length + joinedRun(start, start + length, work, breakMs) <= limit;
+  if (room <= 0) return 0;
+  if (fits(room)) return room;
+  let low = 0;
+  let high = Math.floor(room / MINUTE);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fits(middle * MINUTE)) low = middle;
+    else high = middle - 1;
+  }
+  return low * MINUTE;
+}
+
+/**
+ * Break rule (D12), as an invariant over the final schedule: wherever a piece
+ * goes, no run of task blocks may exceed the limit, counting work already
+ * placed before *and* after it (later placements can fill earlier gaps).
+ * Locked blocks count but never move. Tries the free interval's start, then
+ * the start after a break from the preceding run.
+ */
+function breakPlacement(
+  interval: Interval,
+  needed: number,
+  remaining: number,
+  work: readonly Interval[],
+  breakMs: number,
+  limit: number
+): { start: number; cap: number } | null {
+  const starts = [interval.start];
+  let previousEnd = -Infinity;
+  for (const item of work) {
+    if (
+      item.end <= interval.start &&
+      item.end > interval.start - breakMs &&
+      item.end > previousEnd
+    ) {
+      previousEnd = item.end;
+    }
+  }
+  if (previousEnd > -Infinity) starts.push(previousEnd + breakMs);
+  for (const start of starts) {
+    if (start >= interval.end) continue;
+    const room = Math.min(interval.end - start, remaining, limit);
+    const cap = longestWithinBreakLimit(start, room, work, breakMs, limit);
+    if (cap >= needed) return { start, cap };
+  }
+  return null;
 }
 
 function planUnit(
@@ -539,29 +604,31 @@ function planUnit(
 
     if (!interval) return null;
 
-    // Break rule (D12): after `afterMinutes` of back-to-back task time, the
-    // next piece of work starts after a break; no piece runs past the limit.
     let start = interval.start;
     let breakSlot: Interval | null = null;
     let cap = Infinity;
     if (breakOn) {
-      const run = contiguousRunBefore(
-        start,
+      const needed =
+        allocations.length > 0 && remaining < minChunk * MINUTE
+          ? minChunk * MINUTE
+          : Math.min(remaining, minChunk * MINUTE);
+      const placement = breakPlacement(
+        interval,
+        needed,
+        // A sub-minimum tail grows to the minimum by shortening earlier chunks.
+        Math.max(remaining, needed),
         [...taskWork, ...draftWork],
-        breakLength
+        breakLength,
+        breakAfter
       );
-      const needed = Math.min(remaining, minChunk * MINUTE);
-      if (run > 0 && run + needed > breakAfter) {
-        breakSlot = { start, end: start + breakLength };
-        start = breakSlot.end;
-        cap = breakAfter;
-      } else {
-        cap = breakAfter - run;
-      }
-      if (interval.end - start < Math.min(needed, cap)) {
+      if (!placement) {
         searchAfter = interval.end;
         continue;
       }
+      start = placement.start;
+      cap = placement.cap;
+      if (start > interval.start)
+        breakSlot = { start: interval.start, end: start };
     }
     const capacity = Math.min(interval.end - start, cap);
 

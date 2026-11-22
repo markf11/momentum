@@ -63,6 +63,24 @@ function overlaps(
   return block.start.getTime() < busy.end && block.end.getTime() > busy.start;
 }
 
+/** Task time in each run of blocks separated by gaps shorter than `gap`. */
+function runs(blocks: SchedulerBlock[], gapMinutes: number): number[] {
+  const sorted = [...blocks].sort(
+    (a, b) => a.start.getTime() - b.start.getTime()
+  );
+  const totals: number[] = [];
+  let end = -Infinity;
+  for (const block of sorted) {
+    if (block.start.getTime() - end < gapMinutes * 60_000) {
+      totals[totals.length - 1] += minutes(block);
+    } else {
+      totals.push(minutes(block));
+    }
+    end = Math.max(end, block.end.getTime());
+  }
+  return totals;
+}
+
 function expectNoOverlaps(blocks: SchedulerBlock[]): void {
   const sorted = [...blocks].sort(
     (a, b) => a.start.getTime() - b.start.getTime()
@@ -652,6 +670,100 @@ describe("scheduleTasks", () => {
       expect(result.tasks.every((item) => item.status === "on_time")).toBe(
         true
       );
+    });
+  });
+
+  describe("break rule invariant", () => {
+    const breakSettings = {
+      workWeek: WEEKDAYS,
+      breakRule: { afterMinutes: 120, durationMinutes: 15 },
+    };
+
+    it("does not let a later-placed task extend an earlier-placed run", () => {
+      // "a" goes first (high priority) at 11:00-13:00. "b" then fills the
+      // morning: it must stop a break short of "a", not run 09:00-11:00.
+      const result = scheduleTasks(
+        input({
+          tasks: [
+            task({
+              id: "a",
+              durationMinutes: 120,
+              priority: "high",
+              startDate: new Date("2027-03-08T16:00:00.000Z"),
+            }),
+            task({ id: "b", durationMinutes: 120, priority: "low" }),
+          ],
+          settings: breakSettings,
+        })
+      );
+
+      expect(result.tasks.every((item) => item.status === "on_time")).toBe(
+        true
+      );
+      expect(runs(result.blocks, 15).every((total) => total <= 120)).toBe(true);
+      expect(
+        result.blocks
+          .filter((block) => block.taskId === "b")
+          .reduce((sum, block) => sum + minutes(block), 0)
+      ).toBe(120);
+      expectNoOverlaps(result.blocks);
+    });
+
+    it("never places work that extends a locked run past the limit", () => {
+      const locked = task({
+        id: "locked",
+        durationMinutes: 150,
+        locked: true,
+        // 10:00-12:30 New York: already longer than the limit.
+        scheduledStart: new Date("2027-03-08T15:00:00.000Z"),
+        scheduledEnd: new Date("2027-03-08T17:30:00.000Z"),
+      });
+      const result = scheduleTasks(
+        input({
+          tasks: [locked, task({ id: "z", durationMinutes: 60 })],
+          settings: breakSettings,
+        })
+      );
+
+      const z = result.blocks.filter((block) => block.taskId === "z");
+      // Nothing within one break of 10:00-12:30; the 09:00 hour can only
+      // take a piece that ends by 09:45.
+      expect(z.reduce((sum, block) => sum + minutes(block), 0)).toBe(60);
+      for (const block of z) {
+        expect(
+          block.end.getTime() <= Date.parse("2027-03-08T14:45:00.000Z") ||
+            block.start.getTime() >= Date.parse("2027-03-08T17:45:00.000Z")
+        ).toBe(true);
+      }
+      expect(
+        result.blocks.find((block) => block.taskId === "locked")
+      ).toMatchObject({
+        start: new Date("2027-03-08T15:00:00.000Z"),
+        end: new Date("2027-03-08T17:30:00.000Z"),
+        locked: true,
+      });
+    });
+
+    it("counts short gaps as part of the run", () => {
+      // A 10-minute meeting at 10:00 is shorter than the 15-minute break, so
+      // 09:00-10:00 and 10:10-... are one run.
+      const result = scheduleTasks(
+        input({
+          tasks: [task({ id: "a", durationMinutes: 180 })],
+          busyEvents: [
+            {
+              start: new Date("2027-03-08T15:00:00.000Z"),
+              end: new Date("2027-03-08T15:10:00.000Z"),
+            },
+          ],
+          settings: breakSettings,
+        })
+      );
+
+      expect(runs(result.blocks, 15).every((total) => total <= 120)).toBe(true);
+      expect(
+        result.blocks.reduce((sum, block) => sum + minutes(block), 0)
+      ).toBe(180);
     });
   });
 });
